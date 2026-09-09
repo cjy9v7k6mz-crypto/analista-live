@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Build artefacts / deploy bundles
+*.zip
+
+# Editor / tooling
+.vscode/
+.idea/
+node_modules/
+
+# Netlify local
+.netlify/

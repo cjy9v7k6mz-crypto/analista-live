@@ -1,0 +1,93 @@
+/**
+ * sw.js — Service Worker. Cache do "app shell" para funcionamento 100% offline
+ * depois da primeira visita. Estratégia: cache-first com atualização em segundo
+ * plano (stale-while-revalidate) para os ficheiros da aplicação.
+ */
+
+const CACHE_VERSION = 'analista-live-v15';
+const ASSETS = [
+  './',
+  './index.html',
+  './manifest.json',
+  './css/style.css',
+  './js/vendor/pdf-lib.min.js',
+  './js/data/defaultLibrary.js',
+  './js/data/formationPresets.js',
+  './js/data/scoutingModel.js',
+  './js/core/utils.js',
+  './js/core/db.js',
+  './js/core/imageUtils.js',
+  './js/core/timer.js',
+  './js/core/state.js',
+  './js/core/migrations.js',
+  './js/core/lineupState.js',
+  './js/core/pitch.js',
+  './js/core/matchStats.js',
+  './js/sync/syncCore.js',
+  './js/sync/transportLocal.js',
+  './js/sync/transportSupabase.js',
+  './js/ui/syncUI.js',
+  './js/ui/coachDashboard.js',
+  './js/export/exportManager.js',
+  './js/export/pdfReport.js',
+  './js/export/pdfScouting.js',
+  './js/ui/dashboard.js',
+  './js/ui/newGame.js',
+  './js/ui/planBuilder.js',
+  './js/ui/playerPicker.js',
+  './js/ui/lineupBuilder.js',
+  './js/ui/statsPanel.js',
+  './js/ui/sketchPad.js',
+  './js/ui/live.js',
+  './js/ui/halftime.js',
+  './js/ui/postgame.js',
+  './js/ui/gamesList.js',
+  './js/ui/library.js',
+  './js/ui/teams.js',
+  './js/ui/teamProfile.js',
+  './js/ui/scouting.js',
+  './js/ui/scoutingHub.js',
+  './js/ui/rosterImport.js',
+  './js/ui/playerDetail.js',
+  './js/ui/settings.js',
+  './js/app.js',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-maskable-512.png',
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_VERSION).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return; // não intercetar escritas (não há chamadas de rede na app, mas por segurança)
+
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      const networkFetch = fetch(request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const clone = response.clone();
+            caches.open(CACHE_VERSION).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        })
+        .catch(() => cached); // offline: usa o cache
+
+      // Cache-first para velocidade; atualiza em segundo plano.
+      return cached || networkFetch;
+    })
+  );
+});

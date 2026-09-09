@@ -1,0 +1,24 @@
+# Analista Live — site estático (PWA sem build).
+# O Netlify publica a raiz do repositório tal como está.
+
+[build]
+  publish = "."
+  command = ""
+
+# O router é por #hash, por isso não é preciso redirect de SPA.
+# Cabeçalhos: o service worker nunca deve ser servido de cache do browser,
+# senão os dispositivos ficam presos a uma versão antiga.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
