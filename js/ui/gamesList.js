@@ -21,6 +21,7 @@ const GamesListScreen = {
             ⬆ Restaurar backup (JSON)
             <input type="file" id="file-restore" accept="application/json" hidden>
           </label>
+          ${matches.length ? `<button class="btn btn-danger-outline" id="btn-wipe-games">🗑 Apagar todos os jogos</button>` : ''}
         </div>
 
         <div class="games-list">
@@ -61,23 +62,36 @@ const GamesListScreen = {
         const id = btn.dataset.delGame;
         const m = matches.find((x) => x.id === id);
         if (!confirm(`Apagar o jogo ${m ? m.team + ' vs ' + m.opponent : ''} e todos os seus registos? Esta ação não pode ser desfeita.`)) return;
-        // Cascata: eventos, notas manuscritas e sessões de sincronização deste jogo.
-        for (const o of await DB.getAllByIndex(DB.STORES.occurrences, 'matchId', id)) await DB.delete(DB.STORES.occurrences, o.id);
-        for (const d of await DB.getAllByIndex(DB.STORES.drawings, 'matchId', id)) await DB.delete(DB.STORES.drawings, d.id);
-        for (const s of await DB.getAllByIndex(DB.STORES.sessions, 'matchId', id)) await DB.delete(DB.STORES.sessions, s.id);
-        for (const msg of await DB.getAllByIndex(DB.STORES.messages, 'matchId', id)) await DB.delete(DB.STORES.messages, msg.id);
-        await DB.delete(DB.STORES.matches, id);
-        if (AppState.currentMatch && AppState.currentMatch.id === id) {
-          AppState.currentMatch = null;
-          if (AppState.timer) { AppState.timer.destroy(); AppState.timer = null; }
-          if (LiveScreen.match && LiveScreen.match.id === id) LiveScreen.match = null;
-        }
+        await deleteMatchCascade(id);
         toast('Jogo apagado');
         this.render(root);
       });
     });
+
+    const wipeBtn = document.getElementById('btn-wipe-games');
+    if (wipeBtn) wipeBtn.addEventListener('click', async () => {
+      if (!confirm(`Apagar TODOS os ${matches.length} jogos e todos os registos associados (eventos, notas manuscritas, mensagens)?\n\nEquipas, plantéis, scouting e biblioteca NÃO são afetados. Esta ação não pode ser desfeita.`)) return;
+      if (!confirm('Confirma? Não há como recuperar depois.')) return;
+      for (const m of matches) await deleteMatchCascade(m.id);
+      toast('Todos os jogos apagados');
+      this.render(root);
+    });
   },
 };
+
+/** Apaga um jogo e tudo o que lhe pertence (eventos, desenhos, sessões, mensagens). */
+async function deleteMatchCascade(id) {
+  for (const o of await DB.getAllByIndex(DB.STORES.occurrences, 'matchId', id)) await DB.delete(DB.STORES.occurrences, o.id);
+  for (const d of await DB.getAllByIndex(DB.STORES.drawings, 'matchId', id)) await DB.delete(DB.STORES.drawings, d.id);
+  for (const s of await DB.getAllByIndex(DB.STORES.sessions, 'matchId', id)) await DB.delete(DB.STORES.sessions, s.id);
+  for (const msg of await DB.getAllByIndex(DB.STORES.messages, 'matchId', id)) await DB.delete(DB.STORES.messages, msg.id);
+  await DB.delete(DB.STORES.matches, id);
+  if (AppState.currentMatch && AppState.currentMatch.id === id) {
+    AppState.currentMatch = null;
+    if (AppState.timer) { AppState.timer.destroy(); AppState.timer = null; }
+    if (window.LiveScreen && LiveScreen.match && LiveScreen.match.id === id) LiveScreen.match = null;
+  }
+}
 
 function gameRow(m) {
   return `

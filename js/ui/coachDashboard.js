@@ -168,37 +168,69 @@ const CoachDashboard = {
 
         <div class="coach-body">
           <section class="coach-stats">
-            <table class="coach-stats-table">
-              ${['goals', 'shots', 'shotsOnTarget', 'corners', 'foulsCommitted', 'yellowCards']
-                .map((k) => {
-                  const label = MatchStats.STAT_KEYS.find((x) => x.key === k)?.label || k;
-                  return `<tr><td class="cs-own">${st.own[k]}</td><td class="cs-label">${label}</td><td class="cs-opp">${st.opp[k]}</td></tr>`;
-                }).join('')}
-            </table>
+            <table class="coach-stats-table" id="coach-stats-table">${this.statRows(st)}</table>
+            <div class="coach-momentum" id="coach-momentum"></div>
           </section>
 
-          <section class="coach-feed-wrap">
-            <div class="coach-filters">
-              ${[['all', 'Todos'], ['own', m.team], ['opponent', m.opponent], ['important', 'Importantes'], ['moments', '⭐ Momentos']]
-                .map(([k, l]) => `<button class="coach-filter ${this.filter === k ? 'active' : ''}" data-filter="${k}">${Utils.escapeHtml(l)}</button>`).join('')}
+          <section class="coach-centre">
+            <div class="coach-pitch-wrap" id="coach-pitch"></div>
+            <div class="coach-feed-wrap">
+              <div class="coach-filters">
+                ${[['all', 'Todos'], ['own', m.team], ['opponent', m.opponent], ['important', 'Importantes'], ['moments', '⭐ Momentos']]
+                  .map(([k, l]) => `<button class="coach-filter ${this.filter === k ? 'active' : ''}" data-filter="${k}">${Utils.escapeHtml(l)}</button>`).join('')}
+              </div>
+              <div class="coach-filters coach-filters-time">
+                ${[['all', 'Jogo'], ['last5', '5 min'], ['last10', '10 min'], ['1T', '1ª P'], ['2T', '2ª P']]
+                  .map(([k, l]) => `<button class="coach-filter ${this.timeFilter === k ? 'active' : ''}" data-time="${k}">${l}</button>`).join('')}
+              </div>
+              <div class="coach-feed" id="coach-feed"></div>
             </div>
-            <div class="coach-filters coach-filters-time">
-              ${[['all', 'Jogo'], ['last5', '5 min'], ['last10', '10 min'], ['1T', '1ª P'], ['2T', '2ª P']]
-                .map(([k, l]) => `<button class="coach-filter ${this.timeFilter === k ? 'active' : ''}" data-time="${k}">${l}</button>`).join('')}
-            </div>
-            <div class="coach-feed" id="coach-feed"></div>
           </section>
 
           <aside class="coach-side">
             <button class="btn btn-primary btn-block btn-lg" id="coach-save-moment">⭐ Guardar Momento</button>
-            <h3 class="coach-side-title">Mensagens do Analista</h3>
+            <button class="btn btn-block" id="coach-talk">📣 Falar com o analista</button>
+            <h3 class="coach-side-title">Conversa com o analista</h3>
             <div class="coach-messages" id="coach-messages"></div>
           </aside>
         </div>
 
         <div class="coach-toast" id="coach-toast" hidden></div>
+        <div class="coach-spotlight-banner" id="coach-spotlight" hidden></div>
+
+        <dialog id="dlg-coach-moment" class="dialog">
+          <div class="dialog-card">
+            <h3>⭐ Momento <span class="muted" id="coach-moment-time"></span></h3>
+            <textarea id="coach-moment-note" rows="3" placeholder="O que viste? (opcional — ajuda o analista a perceber o teu olhar)"></textarea>
+            <div class="dialog-actions">
+              <button type="button" class="btn" id="coach-moment-cancel">Cancelar</button>
+              <button type="button" class="btn btn-primary" id="coach-moment-save">Guardar</button>
+            </div>
+          </div>
+        </dialog>
+
+        <dialog id="dlg-coach-talk" class="dialog">
+          <div class="dialog-card">
+            <div class="stats-head"><h3>📣 Falar com o analista</h3><button type="button" class="icon-btn" id="coach-talk-close">✕</button></div>
+            <div class="coach-talk-presets" id="coach-talk-presets"></div>
+            <textarea id="coach-talk-text" rows="3" placeholder="Escrever ao analista…"></textarea>
+            <div class="dialog-actions">
+              <button type="button" class="btn btn-primary" id="coach-talk-send">Enviar</button>
+            </div>
+          </div>
+        </dialog>
       </div>`;
   },
+
+  /** Perguntas / pedidos rápidos do banco para o analista. */
+  TALK_PRESETS: [
+    { icon: '👀', text: 'Foca-te nos comportamentos do lateral direito deles.' },
+    { icon: '🧭', text: 'Dá-me leitura do nosso meio-campo.' },
+    { icon: '⚽', text: 'Avisa-me na próxima bola parada a favor.' },
+    { icon: '🔁', text: 'Vou fazer alteração — quem está a render menos?' },
+    { icon: '⏱', text: 'Como estamos de forma física? Quem está a cair?' },
+    { icon: '🎯', text: 'Onde estão a aparecer os espaços deles?' },
+  ],
 
   filteredEvents() {
     const nowMin = this.currentMinute();
@@ -247,12 +279,193 @@ const CoachDashboard = {
   renderMessages() {
     const box = document.getElementById('coach-messages');
     if (!box) return;
-    if (!this.messages.length) { box.innerHTML = '<p class="muted">Sem mensagens.</p>'; return; }
-    box.innerHTML = this.messages.slice(0, 12).map((msg) => `
-      <div class="coach-msg prio-${msg.priority || 'normal'}">
-        <span class="coach-msg-head">${msg.icon || '🧠'} ${Utils.escapeHtml(msg.title || 'Analista')} <span class="muted">${String(msg.minute ?? '').padStart(2, '0')}'</span></span>
+    if (!this.messages.length) { box.innerHTML = '<p class="muted">Ainda sem conversa. Usa “📣 Falar com o analista”.</p>'; return; }
+    box.innerHTML = this.messages.slice(0, 16).map((msg) => {
+      const mine = msg.sender === 'coach';
+      return `
+      <div class="coach-msg prio-${msg.priority || 'normal'} ${mine ? 'is-mine' : ''}">
+        <span class="coach-msg-head">${mine ? '🫱 Eu' : `${msg.icon || '🧠'} ${Utils.escapeHtml(msg.title || 'Analista')}`} <span class="muted">${String(msg.minute ?? '').padStart(2, '0')}'</span></span>
         <p>${Utils.escapeHtml(msg.text || '')}</p>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+  },
+
+  statRows(st) {
+    return ['goals', 'shots', 'shotsOnTarget', 'corners', 'foulsCommitted', 'yellowCards'].map((k) => {
+      const label = MatchStats.STAT_KEYS.find((x) => x.key === k)?.label || k;
+      return `<tr><td class="cs-own">${st.own[k]}</td><td class="cs-label">${label}</td><td class="cs-opp">${st.opp[k]}</td></tr>`;
+    }).join('');
+  },
+
+  renderStats() {
+    const t = document.getElementById('coach-stats-table');
+    if (!t || !this.match) return;
+    t.innerHTML = this.statRows(MatchStats.compute(this.match, this.occurrences));
+  },
+
+  // ---------- Campo ao vivo ----------
+  renderPitch() {
+    const wrap = document.getElementById('coach-pitch');
+    if (!wrap || !this.match) return;
+
+    const sideLayer = (side) => {
+      const players = this.players.filter((p) => p.teamId === this.match.teams?.[side]?.teamId);
+      const state = LineupState.compute(this.match, side);
+      return state.positions.map((pos) => {
+        const p = players.find((x) => x.id === pos.playerId);
+        const status = p ? state.statusByPlayerId.get(p.id) : null;
+        const cls = `coach-token ${side === 'own' ? 'is-own' : 'is-opp'} ${status === 'sub_in' ? 'is-sub-in' : ''} ${this._spotlightId && p && p.id === this._spotlightId ? 'is-spotlight' : ''}`;
+        // A nossa equipa ataca para CIMA (top = 100 - y); o adversário ataca para
+        // BAIXO no mesmo campo (top = y) — os dois onze cabem numa só imagem.
+        const top = side === 'own' ? (100 - pos.y) : pos.y;
+        return `<button class="${cls}" style="left:${pos.x}%; top:${top}%" ${p ? `data-coach-player="${p.id}"` : ''} title="${p ? Utils.escapeHtml(p.name) : pos.role}">
+          <span class="coach-token-num">${p ? (p.number || '') : ''}</span>
+          <span class="coach-token-name">${p ? Utils.escapeHtml(p.shortName || p.name) : pos.role}</span>
+        </button>`;
+      }).join('');
+    };
+
+    // Pins de remates / faltas dos últimos ~12 min (ou tudo se o jogo for curto).
+    const nowMin = this.currentMinute();
+    const recent = this.occurrences.filter((o) => (o.minute ?? 0) >= nowMin - 12);
+    const pins = recent.filter((o) => (o.source === 'remate' && o.meta?.origin) || (o.source === 'falta' && o.meta?.location))
+      .map((o) => {
+        const xy = o.source === 'remate' ? o.meta.origin : o.meta.location;
+        const isGoal = o.source === 'remate' && o.meta?.result === 'goal';
+        const sym = o.source === 'falta' ? '×' : (isGoal ? '★' : '•');
+        return `<span class="coach-pin ${o.team === 'own' ? 'is-own' : 'is-opp'} ${isGoal ? 'is-goal' : ''}" style="left:${xy.x * 100}%; top:${xy.y * 100}%">${sym}</span>`;
+      }).join('');
+
+    const hasLineup = (this.match.teams?.own?.positions || []).length || (this.match.teams?.opponent?.positions || []).length;
+    wrap.innerHTML = hasLineup ? `
+      <div class="pitch-map coach-pitch">
+        ${Pitch.svg()}
+        <div class="pitch-map-layer">
+          ${sideLayer('own')}
+          ${sideLayer('opponent')}
+          ${pins}
+        </div>
+      </div>
+      <div class="coach-pitch-legend">
+        <span><b class="dot own"></b> ${Utils.escapeHtml(this.match.team)} <span class="muted">↑</span></span>
+        <span><b class="dot opp"></b> ${Utils.escapeHtml(this.match.opponent)} <span class="muted">↓</span></span>
+        <span class="muted">★ golo · • remate · × falta (últ. 12′)</span>
+      </div>` : '<p class="muted coach-empty">Onze inicial ainda não foi definido pelo analista.</p>';
+
+    wrap.querySelectorAll('[data-coach-player]').forEach((b) =>
+      b.addEventListener('click', () => this.showPlayerCard(b.dataset.coachPlayer)));
+  },
+
+  showPlayerCard(playerId) {
+    const p = this.players.find((x) => x.id === playerId);
+    if (!p) return;
+    const evs = this.occurrences.filter((o) => (o.playerIds || []).includes(playerId));
+    const shots = evs.filter((e) => e.source === 'remate').length;
+    const goals = evs.filter((e) => e.source === 'remate' && e.meta?.result === 'goal').length;
+    const fouls = evs.filter((e) => e.source === 'falta' && e.meta?.committedById === playerId).length;
+    const cards = evs.filter((e) => e.source === 'cartao').length;
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dialog';
+    dlg.innerHTML = `
+      <div class="dialog-card">
+        <div class="stats-head"><h3>${p.number ? '#' + p.number + ' ' : ''}${Utils.escapeHtml(p.name)}</h3><button type="button" class="icon-btn" data-close>✕</button></div>
+        <p class="muted">${Utils.escapeHtml(p.position || '')}</p>
+        <div class="coach-card-stats">
+          <div><strong>${evs.length}</strong><span>ações</span></div>
+          <div><strong>${shots}</strong><span>remates</span></div>
+          <div><strong>${goals}</strong><span>golos</span></div>
+          <div><strong>${fouls}</strong><span>faltas</span></div>
+          <div><strong>${cards}</strong><span>cartões</span></div>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    dlg.querySelector('[data-close]').addEventListener('click', () => { dlg.close(); dlg.remove(); });
+  },
+
+  // ---------- Momentum ----------
+  renderMomentum() {
+    const el = document.getElementById('coach-momentum');
+    if (!el || !this.match) return;
+    const nowMin = this.currentMinute();
+    const m = MatchStats.momentum(this.occurrences, Math.max(0, nowMin - 5), nowMin + 1);
+    const ownPct = m.total ? m.ownPct : 50;
+    // Estado ambiente: verde se estamos claramente por cima, vermelho se abaixo.
+    const mood = !m.total ? '' : (ownPct >= 62 ? 'is-up' : (ownPct <= 38 ? 'is-down' : ''));
+    document.querySelector('.coach-screen')?.setAttribute('data-mood', mood || 'even');
+    el.innerHTML = `
+      <div class="coach-momentum-label"><span>Momentum</span><span class="muted">últ. 5 min</span></div>
+      <div class="coach-momentum-bar ${mood}">
+        <div class="coach-momentum-fill own" style="width:${ownPct}%"></div>
+        <div class="coach-momentum-fill opp" style="width:${100 - ownPct}%"></div>
+      </div>
+      <div class="coach-momentum-ends"><span>${ownPct}%</span><span>${100 - ownPct}%</span></div>`;
+  },
+
+  // ---------- Spotlight recebido do analista ----------
+  receiveSpotlight(payload) {
+    if (!payload || !payload.playerId) return;
+    // Ignora spotlights antigos que cheguem por recuperação de histórico.
+    if (payload.at && Date.now() - payload.at > 15000) return;
+    this._spotlightId = payload.playerId;
+    const p = this.players.find((x) => x.id === payload.playerId);
+    const banner = document.getElementById('coach-spotlight');
+    if (banner) {
+      banner.innerHTML = `👉 O analista está a apontar: <strong>${p ? (p.number ? '#' + p.number + ' ' : '') + Utils.escapeHtml(p.name) : Utils.escapeHtml(payload.name || 'jogador')}</strong>`;
+      banner.hidden = false;
+    }
+    this.renderPitch();
+    clearTimeout(this._spotlightTimer);
+    this._spotlightTimer = setTimeout(() => {
+      this._spotlightId = null;
+      const b = document.getElementById('coach-spotlight');
+      if (b) b.hidden = true;
+      this.renderPitch();
+    }, 8000);
+  },
+
+  // ---------- Momento com nota ----------
+  openMomentSheet() {
+    const dlg = document.getElementById('dlg-coach-moment');
+    if (!dlg) return this.saveMoment('');
+    document.getElementById('coach-moment-time').textContent = `${String(this.currentMinute()).padStart(2, '0')}'`;
+    document.getElementById('coach-moment-note').value = '';
+    dlg.showModal();
+  },
+
+  // ---------- Falar com o analista ----------
+  openTalkSheet() {
+    const dlg = document.getElementById('dlg-coach-talk');
+    if (!dlg) return;
+    document.getElementById('coach-talk-presets').innerHTML = this.TALK_PRESETS.map((p, i) =>
+      `<button type="button" class="btn coach-talk-preset" data-talk="${i}">${p.icon} ${Utils.escapeHtml(p.text)}</button>`).join('');
+    document.getElementById('coach-talk-text').value = '';
+    dlg.querySelectorAll('[data-talk]').forEach((b) => b.addEventListener('click', () => {
+      this.sendToAnalyst(this.TALK_PRESETS[Number(b.dataset.talk)].icon, this.TALK_PRESETS[Number(b.dataset.talk)].text);
+      dlg.close();
+    }));
+    dlg.showModal();
+  },
+
+  async sendToAnalyst(icon, text, priority = 'normal') {
+    text = String(text || '').trim();
+    if (!text) return;
+    const msg = {
+      id: Utils.uid('msg'),
+      matchId: this.match.id,
+      sender: 'coach',
+      icon, title: 'Banco', text,
+      priority,
+      minute: this.currentMinute(),
+      period: this.match.timerSnapshot?.period || this.match.currentPeriod || '1T',
+      createdAt: Date.now(),
+      readStatus: false,
+    };
+    await DB.put(DB.STORES.messages, msg);
+    this.messages.unshift(msg);
+    SyncCore.publish('message', 'upsert', msg);
+    this.renderMessages();
+    this.flash('Enviado ao analista');
   },
 
   /** Minuto atual reconstruído a partir do snapshot do cronómetro. */
@@ -319,6 +532,9 @@ const CoachDashboard = {
     root.innerHTML = this.template();
     this.bind();
     this.startClock();
+    this.renderPitch();
+    this.renderMomentum();
+    this.renderStats();
     const feed = document.getElementById('coach-feed');
     if (feed) feed.scrollTop = scroll;
   },
@@ -334,7 +550,25 @@ const CoachDashboard = {
       document.querySelectorAll('[data-time]').forEach((x) => x.classList.toggle('active', x === b));
       this.renderFeed();
     }));
-    document.getElementById('coach-save-moment').addEventListener('click', () => this.saveMoment());
+    document.getElementById('coach-save-moment').addEventListener('click', () => this.openMomentSheet());
+    document.getElementById('coach-talk').addEventListener('click', () => this.openTalkSheet());
+
+    const mDlg = document.getElementById('dlg-coach-moment');
+    document.getElementById('coach-moment-cancel').addEventListener('click', () => mDlg.close());
+    document.getElementById('coach-moment-save').addEventListener('click', () => {
+      const note = document.getElementById('coach-moment-note').value.trim();
+      mDlg.close();
+      this.saveMoment(note);
+    });
+
+    const tDlg = document.getElementById('dlg-coach-talk');
+    document.getElementById('coach-talk-close').addEventListener('click', () => tDlg.close());
+    document.getElementById('coach-talk-send').addEventListener('click', () => {
+      const text = document.getElementById('coach-talk-text').value.trim();
+      if (!text) { document.getElementById('coach-talk-text').focus(); return; }
+      this.sendToAnalyst('📣', text);
+      tDlg.close();
+    });
 
     // Sair do Modo Banco: encerra a sessão para não voltar a abrir este jogo
     // automaticamente na próxima utilização.
@@ -351,11 +585,14 @@ const CoachDashboard = {
 
     this.renderFeed();
     this.renderMessages();
+    this.renderPitch();
+    this.renderMomentum();
+    this.renderStats();
     this.paintConnection(SyncCore.status);
   },
 
   /** O staff marca um instante relevante. Fica identificado como COACH_SAVED. */
-  async saveMoment() {
+  async saveMoment(note = '') {
     const min = this.currentMinute();
     const occ = {
       id: Utils.uid('occ'),
@@ -369,7 +606,7 @@ const CoachDashboard = {
       eventName: 'Momento (banco)',
       eventType: 'neutral',
       priority: 'important',
-      note: '',
+      note: note || '',
       source: 'momento',
       playerIds: [],
       team: null,
@@ -381,7 +618,7 @@ const CoachDashboard = {
     this.occurrences.push(occ);
     SyncCore.publish('occurrence', 'upsert', occ);
     this.renderFeed();
-    this.flash('⭐ Momento guardado');
+    this.flash(note ? '⭐ Momento + nota guardados' : '⭐ Momento guardado');
   },
 
   flash(text) {
@@ -418,18 +655,24 @@ const CoachDashboard = {
     this.unsubscribe = [
       SyncCore.onStatus((st) => this.paintConnection(st)),
       SyncCore.onMessage(async (env) => {
-        // Qualquer envelope faz o banco reler o estado do jogo a partir da base
-        // de dados local. É barato e elimina a dependência de um tipo concreto
-        // de mensagem chegar primeiro — o placar nunca fica desatualizado por
-        // causa da ordem de chegada.
+        // O spotlight é efémero — não mexe nos dados, só acende um jogador.
+        if (env.entityType === 'spotlight') { this.receiveSpotlight(env.payload); return; }
+
+        // Qualquer outro envelope faz o banco reler o estado do jogo a partir da
+        // base de dados local. É barato e elimina a dependência de um tipo
+        // concreto de mensagem chegar primeiro — o placar nunca fica
+        // desatualizado por causa da ordem de chegada.
         await this.loadData();
         this.paintScore();
         this.renderFeed();
         this.renderMessages();
+        this.renderPitch();
+        this.renderMomentum();
+        this.renderStats();
 
         if (env.entityType === 'occurrence' && env.payload?.source === 'golo') {
           this.flash('⚽ ' + (env.payload.eventName || 'Golo'));
-        } else if (env.entityType === 'message') {
+        } else if (env.entityType === 'message' && env.payload?.sender !== 'coach') {
           const p = env.payload || {};
           this.flash(`${p.icon || '🧠'} ${p.text || 'Nova mensagem'}`);
         }

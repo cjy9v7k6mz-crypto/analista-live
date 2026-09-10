@@ -108,6 +108,8 @@ const BenchMessaging = {
     { icon: '🧠', title: 'Nota', text: '', priority: 'normal' },
   ],
 
+  _dlg: null,
+
   open(live) {
     const dlg = document.createElement('dialog');
     dlg.className = 'dialog';
@@ -115,9 +117,11 @@ const BenchMessaging = {
     dlg.innerHTML = `
       <div class="dialog-card">
         <div class="stats-head">
-          <h3>📣 Comunicar ao Banco</h3>
+          <h3>📣 Banco</h3>
           <button type="button" class="icon-btn" data-close>✕</button>
         </div>
+        <div id="bench-inbox" class="bench-inbox"></div>
+        <p class="field-label">Enviar ao banco</p>
         <div class="msg-presets">
           ${this.PRESETS.map((p, i) => `
             <button class="btn btn-lg msg-preset prio-${p.priority}" data-preset="${i}">
@@ -139,10 +143,13 @@ const BenchMessaging = {
         </div>
       </div>`;
     document.body.appendChild(dlg);
+    this._dlg = dlg;
     dlg.showModal();
+    this.renderInbox(live);
 
-    const close = () => { dlg.close(); dlg.remove(); };
+    const close = () => { dlg.close(); dlg.remove(); this._dlg = null; };
     dlg.querySelector('[data-close]').addEventListener('click', close);
+    dlg.addEventListener('cancel', () => { this._dlg = null; });
 
     dlg.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', async () => {
       const preset = this.PRESETS[Number(b.dataset.preset)];
@@ -161,6 +168,22 @@ const BenchMessaging = {
       await this.send(live, '🧠', 'Analista', text, dlg.querySelector('#msg-priority').value);
       close();
     });
+  },
+
+  /** Lista as mensagens que o banco enviou ao analista (as mais recentes primeiro). */
+  async renderInbox(live) {
+    const box = this._dlg && this._dlg.querySelector('#bench-inbox');
+    if (!box) return;
+    const msgs = (await DB.getAllByIndex(DB.STORES.messages, 'matchId', live.match.id))
+      .filter((m) => m.sender === 'coach')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 8);
+    if (!msgs.length) { box.innerHTML = '<p class="muted">O banco ainda não enviou nada.</p>'; return; }
+    box.innerHTML = `<p class="field-label">Do banco</p>` + msgs.map((m) => `
+      <div class="bench-inbox-msg">
+        <span class="muted">${m.icon || '📣'} ${String(m.minute ?? '').padStart(2, '0')}'</span>
+        <span>${Utils.escapeHtml(m.text || '')}</span>
+      </div>`).join('');
   },
 
   async send(live, icon, title, text, priority) {

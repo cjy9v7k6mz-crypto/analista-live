@@ -352,11 +352,17 @@ input, select, textarea { font-family: inherit; }
 .live-side { border-left: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-direction: column; overflow: hidden; }
 .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px; }
 .quick-btn {
+  position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
   min-height: 72px; border-radius: var(--radius); border: 1px solid var(--border-strong); cursor: pointer;
   font-size: 20px; background: var(--surface);
 }
 .quick-btn span { font-size: 11px; font-weight: 700; color: var(--text-dim); }
+.quick-badge {
+  position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 10px; background: var(--c-red); color: #fff; font-size: 12px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+}
 .quick-momento { border-color: var(--c-purple); }
 .quick-momento span { color: var(--c-purple); }
 .quick-banco { border-color: var(--c-red); }
@@ -1152,6 +1158,70 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 @media (max-width: 1100px) {
   .coach-body { grid-template-columns: 1fr; overflow-y: auto; }
   .coach-score { font-size: 42px; }
+}
+
+/* ---------- Modo Banco v1: campo, momentum, conversa, spotlight ---------- */
+.coach-centre { display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.coach-pitch-wrap { flex-shrink: 0; }
+.coach-pitch { position: relative; width: 100%; max-width: 340px; margin: 0 auto; aspect-ratio: 68/105;
+  background: #143223; border-radius: var(--radius); overflow: hidden; }
+.coach-pitch .pitch-svg { position: absolute; inset: 0; }
+.coach-pitch .pitch-map-layer { position: absolute; inset: 0; }
+.coach-token { position: absolute; transform: translate(-50%,-50%); display: flex; flex-direction: column; align-items: center;
+  gap: 1px; background: none; border: none; cursor: pointer; padding: 0; width: 40px; }
+.coach-token-num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: #06101f; background: var(--c-blue); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.coach-token.is-opp .coach-token-num { background: var(--c-red); color: #fff; }
+.coach-token-name { font-size: 8px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px #000; max-width: 44px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coach-token.is-sub-in .coach-token-num { outline: 2px solid var(--c-green); outline-offset: 1px; }
+.coach-token.is-spotlight .coach-token-num { animation: coachPulse 1s ease-in-out infinite; background: var(--c-yellow); color: #06101f; }
+@keyframes coachPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(227,178,60,.7); } 50% { box-shadow: 0 0 0 10px rgba(227,178,60,0); } }
+.coach-pin { position: absolute; transform: translate(-50%,-50%); font-size: 12px; font-weight: 800; line-height: 1; pointer-events: none; }
+.coach-pin.is-own { color: var(--c-blue); }
+.coach-pin.is-opp { color: var(--c-red); }
+.coach-pin.is-goal { font-size: 17px; text-shadow: 0 0 6px currentColor; }
+.coach-pitch-legend { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.coach-pitch-legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; margin-right: 3px; }
+.coach-pitch-legend .dot.own { background: var(--c-blue); }
+.coach-pitch-legend .dot.opp { background: var(--c-red); }
+
+.coach-momentum { margin-top: 14px; }
+.coach-momentum-label { display: flex; justify-content: space-between; font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .05em; color: var(--text-dim); margin-bottom: 4px; }
+.coach-momentum-bar { display: flex; height: 16px; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+.coach-momentum-fill { transition: width .5s ease; }
+.coach-momentum-fill.own { background: var(--c-blue); }
+.coach-momentum-fill.opp { background: var(--c-red); }
+.coach-momentum-bar.is-up { box-shadow: 0 0 0 2px var(--c-green); }
+.coach-momentum-bar.is-down { box-shadow: 0 0 0 2px var(--c-red); }
+.coach-momentum-ends { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--text-dim); margin-top: 3px; }
+
+.coach-msg.is-mine { border-left-color: var(--c-green); background: var(--surface-2); }
+.coach-spotlight-banner { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 900;
+  background: var(--c-yellow); color: #06101f; padding: 10px 22px; border-radius: 24px; font-size: 15px; font-weight: 700;
+  box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+
+.coach-talk-presets { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.coach-talk-preset { text-align: left; justify-content: flex-start; font-weight: 600; font-size: 14px; }
+.coach-card-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.coach-card-stats div { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 4px; text-align: center; }
+.coach-card-stats strong { display: block; font-size: 22px; }
+.coach-card-stats span { font-size: 10px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .03em; }
+
+/* Estado ambiente subtil (o treinador lê pela periferia) */
+.coach-screen[data-mood="is-up"] .coach-top { box-shadow: inset 0 3px 0 0 var(--c-green); }
+.coach-screen[data-mood="is-down"] .coach-top { box-shadow: inset 0 3px 0 0 var(--c-red); }
+
+/* Caixa de entrada do banco no diálogo do analista */
+.bench-inbox { margin-bottom: 10px; }
+.bench-inbox-msg { display: flex; gap: 10px; align-items: baseline; background: var(--surface-2);
+  border-left: 3px solid var(--c-green); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 14px; margin-bottom: 6px; }
+.bench-inbox-msg .muted { flex-shrink: 0; font-family: var(--font-mono); font-size: 12px; }
+
+@media (max-width: 1100px) {
+  .coach-centre { overflow: visible; }
+  .coach-pitch { max-width: 300px; }
 }
 
 /* Diagnóstico da sincronização */

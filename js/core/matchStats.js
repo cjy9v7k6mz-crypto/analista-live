@@ -135,6 +135,36 @@ const MatchStats = {
     return occurrences.filter((o) => o.source === 'remate');
   },
 
+  /**
+   * "Momentum" de uma janela de tempo — quem tem estado por cima, calculado só
+   * a partir do que foi registado (sem inventar). Devolve pontuações brutas por
+   * equipa; a UI transforma em percentagem/barra. Não guarda nada.
+   *
+   * Pesos: golo 6 · remate enquadrado 4 · remate 2 · canto 1 · ataque perigoso 1
+   *        · falta sofrida 0.5 (bola parada perto). Bola parada defensiva não conta.
+   */
+  momentum(occurrences, fromMinute = 0, toMinute = Infinity) {
+    const w = { own: 0, opp: 0 };
+    const add = (team, n) => { if (team === 'own') w.own += n; else if (team === 'opponent') w.opp += n; };
+    occurrences.forEach((o) => {
+      if (o.minute < fromMinute || o.minute > toMinute) return;
+      if (o.source === 'golo') add(o.team, 6);
+      else if (o.source === 'remate') {
+        const r = o.meta?.result;
+        add(o.team, (r === 'goal' || r === 'save') ? 4 : 2);
+      } else if (o.source === 'canto') add(o.team, 1);
+      else if (o.source === 'stat_quick' && o.meta?.statKey === 'dangerousAttacks') add(o.team, 1);
+      else if (o.source === 'falta') add(o.team === 'own' ? 'opponent' : 'own', 0.5);
+    });
+    const total = w.own + w.opp;
+    return {
+      own: w.own, opp: w.opp,
+      ownPct: total ? Math.round((w.own / total) * 100) : 50,
+      oppPct: total ? Math.round((w.opp / total) * 100) : 50,
+      total,
+    };
+  },
+
   foulsList(occurrences) {
     return occurrences.filter((o) => o.source === 'falta');
   },

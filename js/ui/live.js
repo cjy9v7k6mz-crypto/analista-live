@@ -422,8 +422,29 @@ const LiveScreen = {
       </div>
     `;
 
+    // Toque curto = ficha do jogador. Pressão longa = "apontar" este jogador no
+    // ecrã do banco (spotlight partilhado) — os dois dispositivos ficam a olhar
+    // para o mesmo sítio.
     strip.querySelectorAll('[data-open-player]').forEach((el) => {
-      el.addEventListener('click', () => { window.location.hash = `#/player/${this.match.id}/${el.dataset.openPlayer}`; });
+      let lp = null;
+      let fired = false;
+      const startLP = () => {
+        fired = false;
+        lp = setTimeout(() => {
+          fired = true;
+          Utils.vibrate(12);
+          this.spotlightPlayer(el.dataset.openPlayer);
+        }, 480);
+      };
+      const cancelLP = () => clearTimeout(lp);
+      el.addEventListener('pointerdown', startLP);
+      el.addEventListener('pointerup', cancelLP);
+      el.addEventListener('pointercancel', cancelLP);
+      el.addEventListener('pointerleave', cancelLP);
+      el.addEventListener('click', () => {
+        if (fired) { fired = false; return; }
+        window.location.hash = `#/player/${this.match.id}/${el.dataset.openPlayer}`;
+      });
     });
     document.getElementById('btn-toggle-onze-strip').addEventListener('click', async () => {
       await AppState.saveSettings({ onzeStripCollapsed: !collapsed });
@@ -824,10 +845,21 @@ const LiveScreen = {
 
     // Notas manuscritas (Apple Pencil / stylus / dedo)
     document.getElementById('btn-sketch').addEventListener('click', () => SketchPad.open(this.match.id));
-    document.getElementById('btn-bench-msg').addEventListener('click', () => BenchMessaging.open(this));
+    document.getElementById('btn-bench-msg').addEventListener('click', () => { this._benchUnread = 0; this.updateBenchBadge(); BenchMessaging.open(this); });
+    this.updateBenchBadge();
 
     // Indicador discreto do estado da sincronização, junto aos botões do topo.
     ConnectionBadge.mount(document.querySelector('.live-topbar-actions'));
+
+    // Mensagens que chegam do banco (analista <- treinador). Registado uma só
+    // vez — o handler usa o singleton LiveScreen, não o render atual.
+    if (!LiveScreen._benchInbox) {
+      LiveScreen._benchInbox = SyncCore.onMessage((env) => {
+        if (env.entityType === 'message' && env.payload && env.payload.sender === 'coach') {
+          LiveScreen._onBenchMessage(env.payload);
+        }
+      });
+    }
 
     // Rede de segurança: grava o estado no momento exato em que o iPad é
     // bloqueado ou a app vai para segundo plano — é quando o Safari pode ser
@@ -838,6 +870,37 @@ const LiveScreen = {
       };
       document.addEventListener('visibilitychange', LiveScreen._bgGuard);
       window.addEventListener('pagehide', LiveScreen._bgGuard);
+    }
+  },
+
+  /** "Aponta" um jogador no ecrã do banco (spotlight partilhado). */
+  spotlightPlayer(playerId) {
+    const p = this.findPlayerById(playerId);
+    if (!SyncCore.session) { toast('Liga primeiro o dispositivo do banco (⋮ → Ligar dispositivo).'); return; }
+    SyncCore.publish('spotlight', 'set', { playerId, name: p ? p.name : '', at: Date.now() });
+    toast(`👉 A apontar no banco: ${p ? (p.shortName || p.name) : 'jogador'}`);
+  },
+
+  _onBenchMessage(msg) {
+    // O envelope recebido já foi persistido pelo SyncCore (_apply guarda os
+    // 'message'). Aqui é só alertar o analista sem o tirar da grelha de eventos.
+    this._benchUnread = (this._benchUnread || 0) + 1;
+    this.updateBenchBadge();
+    Utils.vibrate(25);
+    toast(`📥 Banco: ${msg.text || 'nova mensagem'}`);
+    if (BenchMessaging._dlg && BenchMessaging._dlg.open) BenchMessaging.renderInbox(this);
+  },
+
+  updateBenchBadge() {
+    const btn = document.getElementById('btn-bench-msg');
+    if (!btn) return;
+    let b = btn.querySelector('.quick-badge');
+    const n = this._benchUnread || 0;
+    if (n > 0) {
+      if (!b) { b = document.createElement('span'); b.className = 'quick-badge'; btn.appendChild(b); }
+      b.textContent = n > 9 ? '9+' : String(n);
+    } else if (b) {
+      b.remove();
     }
   },
 
