@@ -22,7 +22,11 @@ const PlayerDetailScreen = {
     const cards = events.filter((e) => e.source === 'cartao');
     const shots = events.filter((e) => e.source === 'remate');
     const shotsOnTarget = shots.filter((e) => e.meta?.result === 'goal' || e.meta?.result === 'save');
-    const goals = shots.filter((e) => e.meta?.result === 'goal');
+    // Golos = remates marcados "Golo" + golos do placar atribuídos a este jogador
+    // (dois fluxos distintos, nunca o mesmo golo — ver PlayerStats).
+    const goalCount = shots.filter((e) => e.meta?.result === 'goal').length
+      + allOccurrences.filter((o) => o.source === 'golo' && o.meta?.scorerId === player.id).length;
+    const assistCount = allOccurrences.filter((o) => o.source === 'golo' && o.meta?.assistId === player.id).length;
     const corners = events.filter((e) => e.source === 'canto');
     const foulsCommitted = events.filter((e) => e.source === 'falta' && e.meta?.committedById === player.id);
     const foulsSuffered = events.filter((e) => e.source === 'falta' && e.meta?.sufferedById === player.id);
@@ -65,7 +69,8 @@ const PlayerDetailScreen = {
           ${statCard(events.length, 'Eventos')}
           ${statCard(positives.length, 'Positivos', 'positive')}
           ${statCard(negatives.length, 'Negativos', 'negative')}
-          ${statCard(goals.length, 'Golos', 'positive')}
+          ${statCard(goalCount, 'Golos', 'positive')}
+          ${statCard(assistCount, 'Assistências', assistCount ? 'positive' : '')}
           ${statCard(shots.length, 'Remates')}
           ${statCard(shotsOnTarget.length, 'Enquadrados')}
           ${statCard(corners.length, 'Cantos')}
@@ -107,6 +112,8 @@ const PlayerDetailScreen = {
             </div>
           `).join('') : '<p class="muted">Ainda não há eventos associados a este jogador neste jogo.</p>'}
         </div>
+
+        ${team ? `<button class="btn btn-block" data-nav="#/squad-stats/${team.id}">📈 Estatísticas deste jogador em todos os jogos</button>` : ''}
       </div>
     `;
   },

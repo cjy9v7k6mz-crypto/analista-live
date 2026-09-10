@@ -47,6 +47,9 @@ const TeamProfileScreen = {
         <button class="btn btn-block scouting-entry" data-nav="#/scouting/${this.team.id}">
           🎯 Centro de Scouting — perfil, ameaças, jogadores-chave e histórico
         </button>
+        <button class="btn btn-block" data-nav="#/squad-stats/${this.team.id}">
+          📈 Estatísticas do plantel — golos, minutos, faltas… jogo a jogo
+        </button>
 
         ${formations.length ? `
         <h2 class="section-title">Formações Guardadas</h2>

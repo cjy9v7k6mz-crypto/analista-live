@@ -21,7 +21,6 @@ const GamesListScreen = {
             ⬆ Restaurar backup (JSON)
             <input type="file" id="file-restore" accept="application/json" hidden>
           </label>
-          ${matches.length ? `<button class="btn btn-danger-outline" id="btn-wipe-games">🗑 Apagar todos os jogos</button>` : ''}
         </div>
 
         <div class="games-list">
@@ -68,14 +67,6 @@ const GamesListScreen = {
       });
     });
 
-    const wipeBtn = document.getElementById('btn-wipe-games');
-    if (wipeBtn) wipeBtn.addEventListener('click', async () => {
-      if (!confirm(`Apagar TODOS os ${matches.length} jogos e todos os registos associados (eventos, notas manuscritas, mensagens)?\n\nEquipas, plantéis, scouting e biblioteca NÃO são afetados. Esta ação não pode ser desfeita.`)) return;
-      if (!confirm('Confirma? Não há como recuperar depois.')) return;
-      for (const m of matches) await deleteMatchCascade(m.id);
-      toast('Todos os jogos apagados');
-      this.render(root);
-    });
   },
 };
 

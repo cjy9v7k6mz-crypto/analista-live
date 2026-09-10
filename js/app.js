@@ -14,6 +14,8 @@ const routes = [
   { pattern: /^#\/library$/, screen: () => window.LibraryScreen },
   { pattern: /^#\/teams$/, screen: () => window.TeamsScreen },
   { pattern: /^#\/team\/(.+)$/, screen: () => window.TeamProfileScreen, params: (m) => ({ teamId: m[1] }) },
+  { pattern: /^#\/squad-stats$/, screen: () => window.SquadStatsScreen },
+  { pattern: /^#\/squad-stats\/(.+)$/, screen: () => window.SquadStatsScreen, params: (m) => ({ teamId: m[1] }) },
   { pattern: /^#\/scouting$/, screen: () => window.ScoutingHubScreen },
   { pattern: /^#\/scouting\/(.+)$/, screen: () => window.ScoutingScreen, params: (m) => ({ teamId: m[1] }) },
   { pattern: /^#\/player\/(.+)\/(.+)$/, screen: () => window.PlayerDetailScreen, params: (m) => ({ matchId: m[1], playerId: m[2] }) },
