@@ -6,7 +6,7 @@
 const LiveScreen = {
   match: null,
   occurrences: [],
-  activeCategory: 'all',
+  activeCategory: 'bola',
   historyOpen: false,
   historyFilter: { category: 'all', priority: 'all', period: 'all' },
   ownTeam: null,
@@ -55,6 +55,7 @@ const LiveScreen = {
 
     root.innerHTML = this.template();
     this.renderButtons();
+    this.renderFocosStrip();
     this.renderHistory();
     this.renderOnzeStrip();
     this.renderScoreControls();
@@ -94,6 +95,7 @@ const LiveScreen = {
 
         <div class="sub-intent-card" id="sub-intent-card" hidden></div>
         <div class="onze-strip" id="onze-strip"></div>
+        <div class="focos-strip" id="focos-strip"></div>
 
         <div class="live-body">
           <main class="live-main">
@@ -139,12 +141,43 @@ const LiveScreen = {
   },
 
   categoryTabs() {
-    const cats = [{ id: 'all', name: 'Todos' }, ...window.AnalistaLiveData.CATEGORIES];
+    const cats = [{ id: 'bola', name: '⚔️ Bola' }, { id: 'all', name: 'Todos' }, ...window.AnalistaLiveData.CATEGORIES];
     return cats.map((c) => `<button class="cat-tab ${this.activeCategory === c.id ? 'active' : ''}" data-cat="${c.id}">${c.name}</button>`).join('');
   },
 
   dialogsTemplate() {
     return `
+      <dialog id="dlg-transition-classify" class="dialog dialog-transition">
+        <div class="dialog-card">
+          <div class="stats-head"><h3>O que aconteceu aqui?</h3><button type="button" class="icon-btn" id="tc-cancel">✕</button></div>
+          <div class="transition-classify-actions">
+            <button type="button" class="btn btn-lg tc-loss" data-tc="perda">🔴 PERDA</button>
+            <button type="button" class="btn btn-lg tc-recover" data-tc="recuperacao">🟢 RECUPERAÇÃO</button>
+          </div>
+        </div>
+      </dialog>
+
+      <dialog id="dlg-transitions-map" class="dialog dialog-wide">
+        <div class="dialog-card">
+          <div class="stats-head"><h3>🗺 Mapa de Perdas &amp; Recuperações</h3><button type="button" class="icon-btn" id="tmap-close">✕</button></div>
+          <div class="tmap-filters">
+            <span class="tmap-filter-group">
+              <button class="btn btn-tiny" data-tmf="all">Tudo</button>
+              <button class="btn btn-tiny" data-tmf="perda">🔴 Perdas</button>
+              <button class="btn btn-tiny" data-tmf="recuperacao">🟢 Recuperações</button>
+            </span>
+            <span class="tmap-filter-group">
+              <button class="btn btn-tiny" data-tmp="all">Jogo</button>
+              <button class="btn btn-tiny" data-tmp="1T">1ª P</button>
+              <button class="btn btn-tiny" data-tmp="2T">2ª P</button>
+              <button class="btn btn-tiny" data-tmp="last">Últ. 10'</button>
+            </span>
+          </div>
+          <div id="tmap-body"></div>
+          <div class="dialog-actions"><button type="button" class="btn" id="tmap-close2">Fechar</button></div>
+        </div>
+      </dialog>
+
       <dialog id="dlg-momento" class="dialog">
         <div class="dialog-card">
           <h3>⭐ Momento</h3>
@@ -319,24 +352,17 @@ const LiveScreen = {
   renderButtons() {
     const grid = document.getElementById('event-grid');
     if (!grid) return;
-    const plan = this.match.observationPlan || [];
 
-    // Na vista "Todos", separa "Meus Focos" (destacados) do resto — mantém as
-    // restantes categorias inalteradas (não altera o comportamento existente).
-    if (this.activeCategory === 'all') {
-      const focus = plan.filter((e) => e.isFocus);
-      const rest = plan.filter((e) => !e.isFocus);
-      if (focus.length > 0) {
-        grid.innerHTML = `
-          <div class="event-grid-section-title">⭐ MEUS FOCOS</div>
-          <div class="event-btn-grid event-grid-focus">${focus.map((e) => this.eventButtonHTML(e, true)).join('')}</div>
-          ${rest.length ? '<div class="event-grid-section-title">Outros Eventos</div>' : ''}
-          <div class="event-btn-grid">${rest.map((e) => this.eventButtonHTML(e, false)).join('')}</div>
-        `;
-        return;
-      }
+    // Separador "⚔️ Bola" — o campo para registar perdas e recuperações é o
+    // conteúdo principal do painel.
+    if (this.activeCategory === 'bola') {
+      this.renderBolaPanel();
+      return;
     }
 
+    const plan = this.match.observationPlan || [];
+    // Os "Meus Focos" vivem agora na faixa recolhível por cima — aqui a vista
+    // "Todos" mostra o plano completo, sem bloco destacado.
     const sorted = this.activeCategory === 'all' ? plan : plan.filter((e) => e.category === this.activeCategory);
 
     if (sorted.length === 0) {
@@ -344,7 +370,170 @@ const LiveScreen = {
       return;
     }
 
-    grid.innerHTML = `<div class="event-btn-grid">${sorted.map((e) => this.eventButtonHTML(e, false)).join('')}</div>`;
+    grid.innerHTML = `<div class="event-btn-grid">${sorted.map((e) => this.eventButtonHTML(e, e.isFocus)).join('')}</div>`;
+  },
+
+  // ---------- Faixa recolhível "Meus Focos" ----------
+  renderFocosStrip() {
+    const strip = document.getElementById('focos-strip');
+    if (!strip) return;
+    const focos = (this.match.observationPlan || []).filter((e) => e.isFocus);
+    if (focos.length === 0) { strip.innerHTML = ''; strip.hidden = true; return; }
+    strip.hidden = false;
+    const collapsed = AppState.settings?.focosStripCollapsed;
+    strip.innerHTML = `
+      <button class="focos-strip-toggle" id="btn-toggle-focos">${collapsed ? `▾ Focos (${focos.length})` : '▴ Focos'}</button>
+      <div class="focos-strip-row ${collapsed ? 'is-collapsed' : ''}">
+        ${focos.map((e) => {
+          const count = this.countFor(e.id);
+          const trend = Utils.getTrendLevel(count, AppState.settings.trendConfig);
+          return `<button class="foco-chip priority-${e.priority} type-${e.type || 'neutral'} ${trend.showBadge ? 'is-trending' : ''}" data-plan-id="${e.id}">
+            <span class="foco-chip-name">${Utils.escapeHtml(e.name)}</span>
+            <span class="foco-chip-count">${count}</span>
+          </button>`;
+        }).join('')}
+      </div>`;
+    document.getElementById('btn-toggle-focos').addEventListener('click', async () => {
+      await AppState.saveSettings({ focosStripCollapsed: !collapsed });
+      this.renderFocosStrip();
+    });
+  },
+
+  // ---------- Painel "Bola": perdas & recuperações ----------
+  transitionsList() {
+    return this.occurrences.filter((o) => o.source === 'perda' || o.source === 'recuperacao');
+  },
+
+  renderBolaPanel() {
+    const grid = document.getElementById('event-grid');
+    if (!grid) return;
+    const own = this.ownTeam ? LineupState.annotatedRoster(this.match, 'own', this.ownPlayers).filter((p) => p._onField) : [];
+    const opp = this.opponentTeam ? LineupState.annotatedRoster(this.match, 'opponent', this.opponentPlayers).filter((p) => p._onField) : [];
+    const state = this.ownTeam ? LineupState.compute(this.match, 'own') : { positions: [] };
+
+    const all = this.transitionsList();
+    const nPerdas = all.filter((o) => o.source === 'perda').length;
+    const nRec = all.filter((o) => o.source === 'recuperacao').length;
+    const last = [...all].sort((a, b) => b.timestamp - a.timestamp)[0];
+
+    // Rasto: últimos 12 pontos, mais antigos mais transparentes.
+    const recent = [...all].filter((o) => o.meta?.location).sort((a, b) => a.timestamp - b.timestamp).slice(-12);
+    const markers = recent.map((o, i) => {
+      const xy = o.meta.location;
+      const op = 0.35 + 0.65 * ((i + 1) / recent.length);
+      const isLast = last && o.id === last.id;
+      return `<span class="bola-marker ${o.source === 'perda' ? 'is-loss' : 'is-recover'} ${isLast ? 'is-latest' : ''}" style="left:${xy.x * 100}%; top:${xy.y * 100}%; opacity:${op.toFixed(2)}"></span>`;
+    }).join('');
+
+    // Onze da nossa equipa como referência (não interativo — o toque é para a localização).
+    const tokens = (state.positions || []).map((pos) => {
+      const p = this.ownPlayers.find((x) => x.id === pos.playerId);
+      return `<span class="bola-token" style="left:${pos.x}%; top:${100 - pos.y}%">${p ? (p.number || '') : ''}</span>`;
+    }).join('');
+
+    grid.innerHTML = `
+      <div class="bola-panel">
+        <div class="bola-pitch" id="bola-pitch">
+          ${Pitch.svg()}
+          <div class="pitch-map-layer">${tokens}${markers}</div>
+          <div class="bola-hint">Toca onde a bola mudou de dono</div>
+        </div>
+        <div class="bola-bar">
+          <span class="bola-tally">🔴 Perdas <strong>${nPerdas}</strong> · 🟢 Recuperações <strong>${nRec}</strong>${last ? ` · última ${String(last.minute).padStart(2, '0')}'` : ''}</span>
+          <span class="bola-bar-actions">
+            <button class="btn btn-tiny" id="bola-undo" ${all.length ? '' : 'disabled'}>↶ Desfazer</button>
+            <button class="btn btn-tiny" id="bola-map">🗺 Mapa</button>
+          </span>
+        </div>
+      </div>`;
+
+    document.getElementById('bola-pitch').addEventListener('click', (e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+      this.openTransitionClassify({ x: Number(x.toFixed(3)), y: Number(y.toFixed(3)) });
+    });
+    document.getElementById('bola-undo').addEventListener('click', () => this.undoLastTransition());
+    document.getElementById('bola-map').addEventListener('click', () => this.openTransitionsMap());
+    this._bolaOnField = { own, opp };
+  },
+
+  openTransitionClassify(xy) {
+    const dlg = document.getElementById('dlg-transition-classify');
+    if (!dlg) return;
+    dlg.querySelector('#tc-cancel').onclick = () => dlg.close();
+    dlg.querySelector('[data-tc="perda"]').onclick = () => { dlg.close(); this.runTransitionFlow('perda', xy); };
+    dlg.querySelector('[data-tc="recuperacao"]').onclick = () => { dlg.close(); this.runTransitionFlow('recuperacao', xy); };
+    dlg.showModal();
+  },
+
+  async runTransitionFlow(kind, xy) {
+    const { own, opp } = this._bolaOnField || { own: [], opp: [] };
+    const ourName = this.match.team;
+    const oppName = this.match.opponent;
+    // Passo 1: o nosso jogador (quem perdeu numa PERDA, quem recuperou numa RECUPERAÇÃO).
+    const r1 = await PlayerPicker.open({
+      title: kind === 'perda' ? `Quem perdeu — ${ourName}` : `Quem recuperou — ${ourName}`,
+      groups: [{ label: ourName, players: own }], multi: false,
+    });
+    if (r1 === null) return; // cancelado — não regista nada
+    const ownP = r1.players[0] || null;
+    // Passo 2: o adversário (o espelho).
+    const r2 = await PlayerPicker.open({
+      title: kind === 'perda' ? `Quem recuperou — ${oppName}` : `Quem perdeu — ${oppName}`,
+      groups: [{ label: oppName, players: opp }], multi: false,
+    });
+    if (r2 === null) return;
+    const oppP = r2.players[0] || null;
+    await this.saveTransition(kind, xy, ownP, oppP);
+  },
+
+  async saveTransition(kind, xy, ownP, oppP) {
+    const occ = await this.recordOccurrence({
+      eventName: kind === 'perda'
+        ? `Perda de bola${ownP ? ' (' + (ownP.shortName || ownP.name) + ')' : ''}`
+        : `Recuperação${ownP ? ' (' + (ownP.shortName || ownP.name) + ')' : ''}`,
+      category: 'nossa_equipa',
+      team: 'own',
+      priority: kind === 'perda' ? 'important' : 'complementary',
+      source: kind,
+      type: kind === 'perda' ? 'negative' : 'positive',
+      playerIds: [ownP?.id, oppP?.id].filter(Boolean),
+      meta: { location: xy, ownPlayerId: ownP?.id || null, oppPlayerId: oppP?.id || null },
+    });
+    this.renderBolaPanel();
+    this.renderHistory();
+    this.renderFocosStrip();
+    return occ;
+  },
+
+  async undoLastTransition() {
+    const last = [...this.transitionsList()].sort((a, b) => b.timestamp - a.timestamp)[0];
+    if (!last) return;
+    await AppState.deleteOccurrence(last.id);
+    this.occurrences = this.occurrences.filter((o) => o.id !== last.id);
+    SyncCore.publish('occurrence', 'delete', { id: last.id });
+    this.renderBolaPanel();
+    this.renderHistory();
+    toast('Último registo removido');
+  },
+
+  openTransitionsMap() {
+    const dlg = document.getElementById('dlg-transitions-map');
+    if (!dlg) return;
+    this._tmapFilter = this._tmapFilter || 'all';
+    this._tmapPeriod = this._tmapPeriod || 'all';
+    const paint = () => {
+      const nowMin = AppState.timer ? AppState.timer.getGameTimeParts().minute : 999;
+      dlg.querySelector('#tmap-body').innerHTML = MatchStats.renderTransitionsMapHTML(
+        this.occurrences, this.match.team, this.match.opponent, this._tmapFilter, this._tmapPeriod, nowMin);
+      dlg.querySelectorAll('[data-tmf]').forEach((b) => b.classList.toggle('active', b.dataset.tmf === this._tmapFilter));
+      dlg.querySelectorAll('[data-tmp]').forEach((b) => b.classList.toggle('active', b.dataset.tmp === this._tmapPeriod));
+    };
+    dlg.querySelectorAll('[data-tmf]').forEach((b) => b.onclick = () => { this._tmapFilter = b.dataset.tmf; paint(); });
+    dlg.querySelectorAll('[data-tmp]').forEach((b) => b.onclick = () => { this._tmapPeriod = b.dataset.tmp; paint(); });
+    paint();
+    dlg.showModal();
   },
 
   eventButtonHTML(e, isFocus) {
@@ -520,22 +709,18 @@ const LiveScreen = {
     setTimeout(() => btn.classList.remove('is-pressed'), 220);
   },
 
-  bindEvents() {
-    // Tabs de categoria
-    document.getElementById('cat-tabs').addEventListener('click', (e) => {
-      const tab = e.target.closest('[data-cat]');
-      if (!tab) return;
-      this.activeCategory = tab.dataset.cat;
-      document.querySelectorAll('.cat-tab').forEach((t) => t.classList.toggle('active', t === tab));
-      this.renderButtons();
-    });
-
-    // Botões de evento — 1 toque regista imediatamente; pressão longa (~500ms)
-    // abre o seletor de jogador logo a seguir, para quem já sabe quem foi.
+  /**
+   * Liga o gesto "1 toque regista · pressão longa (~480ms) marca jogador" a um
+   * contentor com botões `[data-plan-id]`. Usado tanto na grelha de eventos
+   * como na faixa de focos — o mesmo comportamento, dois sítios.
+   */
+  bindQuickEventTriggers(containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
     let pressTimer = null;
     let longPressPlanId = null;
-    document.getElementById('event-grid').addEventListener('pointerdown', (e) => {
-      const btn = e.target.closest('.event-btn');
+    el.addEventListener('pointerdown', (e) => {
+      const btn = e.target.closest('[data-plan-id]');
       if (!btn) return;
       longPressPlanId = null;
       clearTimeout(pressTimer);
@@ -545,15 +730,10 @@ const LiveScreen = {
         btn.classList.add('is-longpress-armed');
       }, 480);
     });
-    document.getElementById('event-grid').addEventListener('pointerup', () => {
-      clearTimeout(pressTimer);
-    });
-    document.getElementById('event-grid').addEventListener('pointercancel', () => {
-      clearTimeout(pressTimer);
-      longPressPlanId = null;
-    });
-    document.getElementById('event-grid').addEventListener('click', async (e) => {
-      const btn = e.target.closest('.event-btn');
+    el.addEventListener('pointerup', () => clearTimeout(pressTimer));
+    el.addEventListener('pointercancel', () => { clearTimeout(pressTimer); longPressPlanId = null; });
+    el.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-plan-id]');
       if (!btn) return;
       const planEvent = (this.match.observationPlan || []).find((p) => p.id === btn.dataset.planId);
       if (!planEvent) return;
@@ -570,11 +750,29 @@ const LiveScreen = {
         planEventId: planEvent.id,
       });
       this.renderButtons();
+      this.renderFocosStrip();
       this.renderHistory();
       if (wasLongPress) {
         await this.tagPlayersOnOccurrence(occ);
       }
     });
+  },
+
+  bindEvents() {
+    // Tabs de categoria
+    document.getElementById('cat-tabs').addEventListener('click', (e) => {
+      const tab = e.target.closest('[data-cat]');
+      if (!tab) return;
+      this.activeCategory = tab.dataset.cat;
+      document.querySelectorAll('.cat-tab').forEach((t) => t.classList.toggle('active', t === tab));
+      this.renderButtons();
+    });
+
+    // Botões de evento (grelha e faixa de focos) — 1 toque regista imediatamente;
+    // pressão longa (~500ms) abre o seletor de jogador logo a seguir, para quem
+    // já sabe quem foi.
+    this.bindQuickEventTriggers('event-grid');
+    this.bindQuickEventTriggers('focos-strip');
 
     // Cronómetro
     document.getElementById('btn-pause').addEventListener('click', async () => {
@@ -732,6 +930,11 @@ const LiveScreen = {
       this.renderButtons();
       toast('Evento adicionado ao painel');
     });
+
+    // Mapa de Perdas & Recuperações
+    const dlgTmap = document.getElementById('dlg-transitions-map');
+    document.getElementById('tmap-close').addEventListener('click', () => dlgTmap.close());
+    document.getElementById('tmap-close2').addEventListener('click', () => dlgTmap.close());
 
     // MAIS (correção de minuto, compensação, cartões, substituições, modo gestão)
     const dlgMore = document.getElementById('dlg-more');

@@ -57,6 +57,7 @@ const PostgameScreen = {
         <div class="halftime-grid pg-maps-grid">
           <section class="ht-card">${MatchStats.renderMapHTML('shots', occurrences, match.team, match.opponent)}</section>
           <section class="ht-card">${MatchStats.renderMapHTML('fouls', occurrences, match.team, match.opponent)}</section>
+          <section class="ht-card">${MatchStats.renderTransitionsMapHTML(occurrences, match.team, match.opponent)}</section>
         </div>
 
         <div class="halftime-grid">

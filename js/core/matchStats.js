@@ -169,6 +169,88 @@ const MatchStats = {
     return occurrences.filter((o) => o.source === 'falta');
   },
 
+  // ---------- Perdas & Recuperações (transições de posse) ----------
+  transitionsList(occurrences) {
+    return occurrences.filter((o) => o.source === 'perda' || o.source === 'recuperacao');
+  },
+
+  /**
+   * Terço do campo de uma coordenada y (0 = baliza adversária / topo, 1 = nossa
+   * baliza / fundo), do ponto de vista da NOSSA equipa (ataca para cima):
+   *   y < 1/3  -> terço ofensivo   ·   1/3..2/3 -> meio-campo   ·   y > 2/3 -> terço defensivo
+   */
+  thirdOf(y) {
+    if (y == null) return null;
+    if (y < 1 / 3) return 'att';
+    if (y > 2 / 3) return 'def';
+    return 'mid';
+  },
+
+  /** Contagem por terço (def/mid/att) de perdas ou recuperações. */
+  transitionsByThird(occurrences, kind) {
+    const out = { def: 0, mid: 0, att: 0, total: 0 };
+    this.transitionsList(occurrences)
+      .filter((o) => !kind || o.source === kind)
+      .forEach((o) => {
+        const t = this.thirdOf(o.meta?.location?.y);
+        if (t) { out[t]++; out.total++; }
+      });
+    out.defPct = out.total ? Math.round((out.def / out.total) * 100) : 0;
+    out.midPct = out.total ? Math.round((out.mid / out.total) * 100) : 0;
+    out.attPct = out.total ? Math.round((out.att / out.total) * 100) : 0;
+    return out;
+  },
+
+  /**
+   * Mapa de perdas e recuperações — pitch com pontos (🔴 perda · 🟢 recuperação)
+   * + leitura por terços. Usado no LIVE, no pós-jogo e no ecrã do banco.
+   * @param {'all'|'perda'|'recuperacao'} filter
+   * @param {'all'|'1T'|'2T'|'last'} period
+   */
+  renderTransitionsMapHTML(occurrences, ownName, oppName, filter = 'all', period = 'all', nowMin = 999) {
+    let list = this.transitionsList(occurrences)
+      .filter((o) => filter === 'all' || o.source === filter)
+      .filter((o) => {
+        if (period === '1T') return o.period === '1T';
+        if (period === '2T') return o.period === '2T';
+        if (period === 'last') return (o.minute || 0) >= nowMin - 10;
+        return true;
+      });
+    const withCoords = list.filter((o) => o.meta?.location);
+    const markers = withCoords.map((o) => {
+      const xy = o.meta.location;
+      const cls = o.source === 'perda' ? 'is-loss' : 'is-recover';
+      return `<span class="tmap-dot ${cls}" style="left:${xy.x * 100}%; top:${xy.y * 100}%" title="${o.minute}' — ${o.source === 'perda' ? 'perda' : 'recuperação'}"></span>`;
+    }).join('');
+
+    const perda = this.transitionsByThird(list.filter((o) => o.source === 'perda'), 'perda');
+    const rec = this.transitionsByThird(list.filter((o) => o.source === 'recuperacao'), 'recuperacao');
+    const bar = (label, t, cls) => `
+      <div class="tmap-third-row">
+        <span class="tmap-third-label">${label}</span>
+        <span class="tmap-third-cells">
+          <span class="${cls}">Def ${t.defPct}%</span>
+          <span class="${cls}">Meio ${t.midPct}%</span>
+          <span class="${cls}">Of. ${t.attPct}%</span>
+        </span>
+        <span class="tmap-third-total">${t.total}</span>
+      </div>`;
+
+    return `
+      <div class="transitions-map">
+        ${Pitch.mapHTML(markers)}
+        <div class="map-legend">
+          <span><span class="tmap-dot is-loss"></span> Perda</span>
+          <span><span class="tmap-dot is-recover"></span> Recuperação</span>
+          <span class="muted">${Utils.escapeHtml(ownName)} ataca ↑</span>
+        </div>
+        <div class="tmap-thirds">
+          ${bar('🔴 Perdas', perda, 'is-loss')}
+          ${bar('🟢 Recuper.', rec, 'is-recover')}
+        </div>
+      </div>`;
+  },
+
   /**
    * Gera o HTML do mapa de remates ou faltas (reutilizado no LIVE e no pós-jogo,
    * para não duplicar a mesma lógica de desenho em dois sítios).

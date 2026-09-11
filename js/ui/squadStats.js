@@ -190,7 +190,7 @@ const SquadStatsScreen = {
   openPlayerBreakdown(player, agg) {
     const dlg = document.createElement('dialog');
     dlg.className = 'dialog dialog-wide';
-    const cols = ['minutes', 'goals', 'assists', 'shots', 'shotsOnTarget', 'foulsCommitted', 'foulsSuffered', 'yellow', 'red'];
+    const cols = ['minutes', 'goals', 'assists', 'shots', 'shotsOnTarget', 'recuperacoes', 'perdas', 'foulsCommitted', 'foulsSuffered', 'yellow', 'red'];
     const colLabel = (k) => PlayerStats.COLUMNS.find((c) => c.key === k)?.label || k;
     const p90line = agg.minutes >= 45 ? `<p class="muted">Por 90 min: ${['goals', 'assists', 'shots'].map((k) => `${colLabel(k)} ${PlayerStats.per90(agg[k], agg.minutes)}`).join(' · ')}</p>` : '';
     dlg.innerHTML = `

@@ -808,6 +808,7 @@ dialog.dialog-sketch { width: 96vw; max-width: 1200px; }
 .report-sections { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; max-height: 40vh; overflow-y: auto; margin-bottom: 6px; }
 .report-section-item { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 8px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .report-section-item input { width: 18px; height: 18px; }
+.pg-maps-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .pg-maps-grid .ht-card { display: flex; justify-content: center; }
 
 /* ---------- Responsividade ---------- */
@@ -1299,3 +1300,76 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 /* Diagnóstico da sincronização */
 .sync-diag { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   padding: 12px; font-size: 12px; font-family: var(--font-mono); white-space: pre-wrap; line-height: 1.6; margin: 8px 0 0; }
+
+/* ==========================================================================
+   Perdas & Recuperações
+   ========================================================================== */
+
+/* Faixa recolhível "Meus Focos" — secundária, por cima do campo/grelha */
+.focos-strip { display: flex; align-items: center; gap: 8px; padding: 4px 16px; background: var(--bg-elevated); border-bottom: 1px solid var(--border); }
+.focos-strip-toggle { appearance: none; border: none; background: transparent; color: var(--text-mute); font-size: 11px; cursor: pointer; padding: 4px 6px; white-space: nowrap; }
+.focos-strip-row { display: flex; gap: 6px; overflow-x: auto; flex: 1; padding: 3px 0; }
+.focos-strip-row.is-collapsed { display: none; }
+.foco-chip { flex-shrink: 0; display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--border-strong); border-radius: 16px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.foco-chip.priority-critical { border-left-color: var(--c-red); }
+.foco-chip.priority-important { border-left-color: var(--c-yellow); }
+.foco-chip.type-positive .foco-chip-count { color: var(--c-green); }
+.foco-chip.type-negative .foco-chip-count { color: var(--c-red); }
+.foco-chip.is-trending { box-shadow: 0 0 0 1px var(--c-yellow) inset; }
+.foco-chip-count { font-family: var(--font-mono); font-weight: 800; }
+.foco-chip.is-pressed, .event-btn.is-pressed { transform: scale(.96); }
+
+/* Painel "Bola" — campo principal para registar perdas/recuperações */
+.bola-panel { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 8px 0; }
+.bola-pitch { position: relative; width: 100%; max-width: 360px; aspect-ratio: 68/105; border-radius: var(--radius); overflow: hidden; cursor: crosshair; }
+.bola-pitch .pitch-svg { position: absolute; inset: 0; }
+.bola-pitch .pitch-map-layer { position: absolute; inset: 0; }
+.bola-token { position: absolute; transform: translate(-50%,-50%); width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(91,147,240,.25); border: 1px solid rgba(91,147,240,.5); color: #fff; font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.bola-marker { position: absolute; transform: translate(-50%,-50%); width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--bg); pointer-events: none; }
+.bola-marker.is-loss { background: var(--c-red); }
+.bola-marker.is-recover { background: var(--c-green); }
+.bola-marker.is-latest { width: 18px; height: 18px; animation: coachPulse 1.1s ease-in-out 2; }
+.bola-hint { position: absolute; bottom: 6px; left: 0; right: 0; text-align: center; font-size: 11px; color: rgba(255,255,255,.55);
+  pointer-events: none; text-shadow: 0 1px 3px #000; }
+.bola-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; max-width: 360px; flex-wrap: wrap; }
+.bola-tally { font-size: 13px; color: var(--text-dim); }
+.bola-tally strong { color: var(--text); font-family: var(--font-mono); }
+.bola-bar-actions { display: flex; gap: 6px; }
+
+/* Classificar perda/recuperação — diálogo que aparece a seguir ao toque no campo */
+.dialog-transition .dialog-card { max-width: 360px; }
+.transition-classify-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.tc-loss { background: var(--c-red-bg, var(--surface-2)); border-color: var(--c-red); color: var(--c-red); }
+.tc-recover { background: var(--c-green-bg, var(--surface-2)); border-color: var(--c-green); color: var(--c-green); }
+
+/* Mapa de Perdas & Recuperações — analista e banco partilham o mesmo desenho */
+.tmap-filters { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.tmap-filter-group { display: flex; gap: 4px; }
+.tmap-filter-group .btn.active { background: var(--c-blue); border-color: var(--c-blue); color: #06101f; }
+.transitions-map { margin-top: 4px; }
+.tmap-dot { position: absolute; transform: translate(-50%,-50%); width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--bg); }
+.tmap-dot.is-loss { background: var(--c-red); }
+.tmap-dot.is-recover { background: var(--c-green); }
+.tmap-thirds { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.tmap-third-row { display: grid; grid-template-columns: 90px 1fr 34px; align-items: center; gap: 8px; font-size: 12px; }
+.tmap-third-label { font-weight: 700; color: var(--text-dim); }
+.tmap-third-cells { display: flex; gap: 10px; }
+.tmap-third-cells .is-loss { color: var(--c-red); }
+.tmap-third-cells .is-recover { color: var(--c-green); }
+.tmap-third-total { text-align: right; font-family: var(--font-mono); color: var(--text-mute); }
+
+/* Filtro do campo ao vivo no banco: o que aparece (onze/remates/faltas/perdas/recuperações) */
+.coach-pitch-filters { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
+.coach-pitch-filter { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-mute);
+  border-radius: 16px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; opacity: .6; }
+.coach-pitch-filter.active { background: var(--surface); border-color: var(--border-strong); color: var(--text); opacity: 1; }
+
+/* Pins pequenos de perdas/recuperações no campo do banco */
+.coach-pin-sm { width: 6px; height: 6px; border-radius: 50%; font-size: 0; }
+.coach-pin-sm.is-loss { background: var(--c-red); }
+.coach-pin-sm.is-recover { background: var(--c-green); }
+.coach-tmap-btn { margin-top: 4px; }

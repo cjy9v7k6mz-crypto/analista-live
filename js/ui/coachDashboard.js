@@ -17,6 +17,8 @@ const CoachDashboard = {
   messages: [],
   filter: 'all',        // all | own | opponent | important | moments
   timeFilter: 'all',    // all | last5 | last10 | 1T | 2T
+  // O que aparece no campo ao vivo — cada camada liga/desliga independentemente.
+  pitchLayers: { xi: true, shots: true, fouls: true, perdas: true, recuperacoes: true },
   timerTick: null,
   unsubscribe: [],
 
@@ -188,6 +190,10 @@ const CoachDashboard = {
           </section>
 
           <section class="coach-centre">
+            <div class="coach-pitch-filters" id="coach-pitch-filters">
+              ${[['xi', '👥 Onze'], ['shots', '🎯 Remates'], ['fouls', '⚠️ Faltas'], ['perdas', '🔴 Perdas'], ['recuperacoes', '🟢 Recuperações']]
+                .map(([k, l]) => `<button class="coach-pitch-filter ${this.pitchLayers[k] ? 'active' : ''}" data-layer="${k}">${l}</button>`).join('')}
+            </div>
             <div class="coach-pitch-wrap" id="coach-pitch"></div>
             <div class="coach-feed-wrap">
               <div class="coach-filters">
@@ -489,35 +495,87 @@ const CoachDashboard = {
       }).join('');
     };
 
-    // Pins de remates / faltas dos últimos ~12 min (ou tudo se o jogo for curto).
+    // Pins de remates / faltas / perdas / recuperações dos últimos ~12 min,
+    // cada camada ligada/desligada pelos filtros por cima do campo.
+    const L = this.pitchLayers;
     const nowMin = this.currentMinute();
     const recent = this.occurrences.filter((o) => (o.minute ?? 0) >= nowMin - 12);
-    const pins = recent.filter((o) => (o.source === 'remate' && o.meta?.origin) || (o.source === 'falta' && o.meta?.location))
-      .map((o) => {
-        const xy = o.source === 'remate' ? o.meta.origin : o.meta.location;
-        const isGoal = o.source === 'remate' && o.meta?.result === 'goal';
-        const sym = o.source === 'falta' ? '×' : (isGoal ? '★' : '•');
-        return `<span class="coach-pin ${o.team === 'own' ? 'is-own' : 'is-opp'} ${isGoal ? 'is-goal' : ''}" style="left:${xy.x * 100}%; top:${xy.y * 100}%">${sym}</span>`;
-      }).join('');
+    const shotPins = !L.shots ? '' : recent.filter((o) => o.source === 'remate' && o.meta?.origin).map((o) => {
+      const xy = o.meta.origin;
+      const isGoal = o.meta?.result === 'goal';
+      const sym = isGoal ? '★' : '•';
+      return `<span class="coach-pin ${o.team === 'own' ? 'is-own' : 'is-opp'} ${isGoal ? 'is-goal' : ''}" style="left:${xy.x * 100}%; top:${xy.y * 100}%">${sym}</span>`;
+    }).join('');
+    const foulPins = !L.fouls ? '' : recent.filter((o) => o.source === 'falta' && o.meta?.location).map((o) => {
+      const xy = o.meta.location;
+      return `<span class="coach-pin ${o.team === 'own' ? 'is-own' : 'is-opp'}" style="left:${xy.x * 100}%; top:${xy.y * 100}%">×</span>`;
+    }).join('');
+    // Perdas/recuperações recentes — pontos pequenos, sem símbolo (o mapa
+    // completo, com filtros e leitura por terços, está no botão "🗺 Mapa").
+    const perdaPins = !L.perdas ? '' : recent.filter((o) => o.source === 'perda' && o.meta?.location).map((o) =>
+      `<span class="coach-pin coach-pin-sm is-loss" style="left:${o.meta.location.x * 100}%; top:${o.meta.location.y * 100}%"></span>`).join('');
+    const recPins = !L.recuperacoes ? '' : recent.filter((o) => o.source === 'recuperacao' && o.meta?.location).map((o) =>
+      `<span class="coach-pin coach-pin-sm is-recover" style="left:${o.meta.location.x * 100}%; top:${o.meta.location.y * 100}%"></span>`).join('');
 
     const hasLineup = (this.match.teams?.own?.positions || []).length || (this.match.teams?.opponent?.positions || []).length;
-    wrap.innerHTML = hasLineup ? `
+    wrap.innerHTML = `
       <div class="pitch-map coach-pitch">
         ${Pitch.svg()}
         <div class="pitch-map-layer">
-          ${sideLayer('own')}
-          ${sideLayer('opponent')}
-          ${pins}
+          ${(hasLineup && L.xi) ? sideLayer('own') + sideLayer('opponent') : ''}
+          ${shotPins}${foulPins}${perdaPins}${recPins}
         </div>
       </div>
+      ${!hasLineup ? '<p class="muted coach-empty">Onze inicial ainda não foi definido pelo analista.</p>' : ''}
+      <button class="btn btn-tiny coach-tmap-btn" id="coach-open-tmap">🗺 Mapa de Perdas &amp; Recuperações</button>
       <div class="coach-pitch-legend">
         <span><b class="dot own"></b> ${Utils.escapeHtml(this.match.team)} <span class="muted">↑</span></span>
         <span><b class="dot opp"></b> ${Utils.escapeHtml(this.match.opponent)} <span class="muted">↓</span></span>
-        <span class="muted">★ golo · • remate · × falta (últ. 12′)</span>
-      </div>` : '<p class="muted coach-empty">Onze inicial ainda não foi definido pelo analista.</p>';
+        <span class="muted">★ golo · • remate · × falta · 🔴 perda · 🟢 recuperação (últ. 12′)</span>
+      </div>`;
 
     wrap.querySelectorAll('[data-coach-player]').forEach((b) =>
       b.addEventListener('click', () => this.showPlayerCard(b.dataset.coachPlayer)));
+    document.getElementById('coach-open-tmap')?.addEventListener('click', () => this.openTransitionsMap());
+  },
+
+  /** Mapa de Perdas & Recuperações — o mesmo componente do ecrã do analista. */
+  openTransitionsMap() {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dialog dialog-wide';
+    dlg.id = 'dlg-coach-tmap';
+    dlg.innerHTML = `
+      <div class="dialog-card">
+        <div class="stats-head"><h3>🗺 Mapa de Perdas &amp; Recuperações</h3><button type="button" class="icon-btn" data-close>✕</button></div>
+        <div class="tmap-filters">
+          <span class="tmap-filter-group">
+            <button class="btn btn-tiny" data-tmf="all">Tudo</button>
+            <button class="btn btn-tiny" data-tmf="perda">🔴 Perdas</button>
+            <button class="btn btn-tiny" data-tmf="recuperacao">🟢 Recuperações</button>
+          </span>
+          <span class="tmap-filter-group">
+            <button class="btn btn-tiny" data-tmp="all">Jogo</button>
+            <button class="btn btn-tiny" data-tmp="1T">1ª P</button>
+            <button class="btn btn-tiny" data-tmp="2T">2ª P</button>
+            <button class="btn btn-tiny" data-tmp="last">Últ. 10'</button>
+          </span>
+        </div>
+        <div id="ctmap-body"></div>
+        <div class="dialog-actions"><button type="button" class="btn" data-close>Fechar</button></div>
+      </div>`;
+    document.body.appendChild(dlg);
+    let filter = 'all', period = 'all';
+    const paint = () => {
+      dlg.querySelector('#ctmap-body').innerHTML = MatchStats.renderTransitionsMapHTML(
+        this.occurrences, this.match.team, this.match.opponent, filter, period, this.currentMinute());
+      dlg.querySelectorAll('[data-tmf]').forEach((b) => b.classList.toggle('active', b.dataset.tmf === filter));
+      dlg.querySelectorAll('[data-tmp]').forEach((b) => b.classList.toggle('active', b.dataset.tmp === period));
+    };
+    dlg.querySelectorAll('[data-tmf]').forEach((b) => b.addEventListener('click', () => { filter = b.dataset.tmf; paint(); }));
+    dlg.querySelectorAll('[data-tmp]').forEach((b) => b.addEventListener('click', () => { period = b.dataset.tmp; paint(); }));
+    dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => { dlg.close(); dlg.remove(); }));
+    paint();
+    dlg.showModal();
   },
 
   showPlayerCard(playerId) {
@@ -726,6 +784,12 @@ const CoachDashboard = {
       this.renderFeed();
     }));
     document.getElementById('coach-role-chip').addEventListener('click', () => this.cycleRole());
+    document.querySelectorAll('[data-layer]').forEach((b) => b.addEventListener('click', () => {
+      const k = b.dataset.layer;
+      this.pitchLayers[k] = !this.pitchLayers[k];
+      b.classList.toggle('active', this.pitchLayers[k]);
+      this.renderPitch();
+    }));
     document.getElementById('coach-propose-sub').addEventListener('click', () => this.openSubProposeSheet());
     document.getElementById('coach-sub-close').addEventListener('click', () => document.getElementById('dlg-coach-sub').close());
     document.querySelectorAll('[data-time]').forEach((b) => b.addEventListener('click', () => {

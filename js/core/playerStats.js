@@ -23,6 +23,8 @@ const PlayerStats = {
     { key: 'corners', label: 'Cnt', title: 'Cantos batidos', p90: false },
     { key: 'foulsCommitted', label: 'FC', title: 'Faltas cometidas', p90: true },
     { key: 'foulsSuffered', label: 'FS', title: 'Faltas sofridas', p90: true },
+    { key: 'recuperacoes', label: 'Rec', title: 'Recuperações de bola', p90: true },
+    { key: 'perdas', label: 'Prd', title: 'Perdas de bola', p90: true },
     { key: 'yellow', label: '🟨', title: 'Amarelos', p90: false },
     { key: 'red', label: '🟥', title: 'Vermelhos', p90: false },
     { key: 'positives', label: '＋', title: 'Ações positivas', p90: true },
@@ -34,7 +36,7 @@ const PlayerStats = {
   _emptyMatchStats() {
     return {
       goals: 0, assists: 0, shots: 0, shotsOnTarget: 0, saves: 0, corners: 0,
-      foulsCommitted: 0, foulsSuffered: 0, yellow: 0, red: 0,
+      foulsCommitted: 0, foulsSuffered: 0, recuperacoes: 0, perdas: 0, yellow: 0, red: 0,
       positives: 0, negatives: 0, moments: 0, interventions: 0, events: 0,
     };
   },
@@ -57,14 +59,26 @@ const PlayerStats = {
         continue;
       }
       s.events++;
-      if (o.eventType === 'positive') s.positives++;
-      else if (o.eventType === 'negative') s.negatives++;
+      // Perda/recuperação são espelho: o +/- depende de QUAL jogador é —
+      // tratado no switch, não pelo eventType global do evento.
+      if (o.source !== 'perda' && o.source !== 'recuperacao') {
+        if (o.eventType === 'positive') s.positives++;
+        else if (o.eventType === 'negative') s.negatives++;
+      }
 
       switch (o.source) {
         case 'remate':
           s.shots++;
           if (o.meta && (o.meta.result === 'goal' || o.meta.result === 'save')) s.shotsOnTarget++;
           if (o.meta && o.meta.result === 'goal') s.goals++;
+          break;
+        case 'perda':
+          if (o.meta && o.meta.ownPlayerId === playerId) { s.perdas++; s.negatives++; }
+          if (o.meta && o.meta.oppPlayerId === playerId) { s.recuperacoes++; s.positives++; }
+          break;
+        case 'recuperacao':
+          if (o.meta && o.meta.ownPlayerId === playerId) { s.recuperacoes++; s.positives++; }
+          if (o.meta && o.meta.oppPlayerId === playerId) { s.perdas++; s.negatives++; }
           break;
         case 'defesa':
           s.saves++;
