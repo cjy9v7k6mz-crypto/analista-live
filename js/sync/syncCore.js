@@ -223,6 +223,19 @@ const SyncCore = {
    * envio falhar — e o ecrã do banco não precisa delas para nada. Vão apenas
    * os dados necessários para mostrar o jogo.
    */
+  /**
+   * Versão leve do jogo para enviar pela sincronização. Tira o `teamSnapshot`
+   * (fotos dos jogadores em base64 — vários MB, faziam o envelope falhar ou
+   * ficar lento no Supabase, e o ecrã do banco não precisa delas). Mantém tudo
+   * o que o banco usa: placar, período, cronómetro, onze, substituições e plano.
+   */
+  lightMatch(match) {
+    if (!match) return match;
+    const m = { ...match };
+    delete m.teamSnapshot;
+    return m;
+  },
+
   async publishSnapshot(match) {
     const occurrences = await AppState.getOccurrences(match.id);
     const ownId = match.teams?.own?.teamId;
@@ -237,10 +250,7 @@ const SyncCore = {
         number: p.number, position: p.position,
       })));
     }
-    // O jogo vai sem os desenhos e sem o plano completo de imagens.
-    const lightMatch = { ...match };
-    delete lightMatch.teamSnapshot; // contém fotos; não é preciso no banco
-    return this.publish('snapshot', 'snapshot', { match: lightMatch, occurrences, teams, players });
+    return this.publish('snapshot', 'snapshot', { match: this.lightMatch(match), occurrences, teams, players });
   },
 
   /** Envia tudo o que está pendente. Seguro chamar em qualquer altura. */

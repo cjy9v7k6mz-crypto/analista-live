@@ -632,29 +632,29 @@ const CoachDashboard = {
     this.flash('Enviado ao analista');
   },
 
+  /** Minutos já decorridos ANTES do período do snapshot (o resto vem de periodElapsedMs). */
+  _clockBaseMin(snap) {
+    // 'FT' = fim do jogo, o periodElapsedMs é o da 2ª parte → base 45.
+    return { '1T': 0, HT: 0, '2T': 45, ET1: 90, ET2: 105, FT: 45 }[snap.period] ?? 0;
+  },
+
+  _clockMs(snap) {
+    let ms = snap.periodElapsedMs || 0;
+    if (snap.running && snap.savedAt) ms += Math.max(0, Date.now() - snap.savedAt);
+    return ms;
+  },
+
   /** Minuto atual reconstruído a partir do snapshot do cronómetro. */
   currentMinute() {
     const snap = this.match?.timerSnapshot;
     if (!snap) return 0;
-    let ms = snap.periodElapsedMs || 0;
-    if (snap.running && snap.savedAt) ms += Math.max(0, Date.now() - snap.savedAt);
-    let base = 0;
-    if (snap.period === '2T') base = 45;
-    if (snap.period === 'ET1') base = 90;
-    if (snap.period === 'ET2') base = 105;
-    return base + Math.floor(ms / 60000) + Math.floor((snap.manualOffsetSec || 0) / 60);
+    return this._clockBaseMin(snap) + Math.floor(this._clockMs(snap) / 60000) + Math.floor((snap.manualOffsetSec || 0) / 60);
   },
 
   clockLabel() {
     const snap = this.match?.timerSnapshot;
     if (!snap) return '--:--';
-    let ms = snap.periodElapsedMs || 0;
-    if (snap.running && snap.savedAt) ms += Math.max(0, Date.now() - snap.savedAt);
-    let base = 0;
-    if (snap.period === '2T') base = 45;
-    if (snap.period === 'ET1') base = 90;
-    if (snap.period === 'ET2') base = 105;
-    const total = base * 60 + Math.floor(ms / 1000) + (snap.manualOffsetSec || 0);
+    const total = this._clockBaseMin(snap) * 60 + Math.floor(this._clockMs(snap) / 1000) + (snap.manualOffsetSec || 0);
     const mm = Math.max(0, Math.floor(total / 60));
     const ss = Math.max(0, total % 60);
     return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
@@ -692,6 +692,19 @@ const CoachDashboard = {
   repaint() {
     const root = document.getElementById('app-root');
     if (!root || !this.match) return;
+    // Se houver um diálogo aberto (propor substituição, escrever ao analista…),
+    // não recriamos o ecrã todo — atualizamos só os painéis, para não fechar o
+    // que o treinador está a fazer.
+    if (document.querySelector('dialog[open]')) {
+      this.paintScore();
+      this.renderFeed();
+      this.renderMessages();
+      this.renderPitch();
+      this.renderMomentum();
+      this.renderStats();
+      this.renderPeriodSummary();
+      return;
+    }
     const scroll = document.getElementById('coach-feed')?.scrollTop || 0;
     root.innerHTML = this.template();
     this.bind();
@@ -817,8 +830,13 @@ const CoachDashboard = {
     if (!this.match) return;
     const scoreEl = document.querySelector('.coach-score');
     if (scoreEl) scoreEl.innerHTML = `${this.match.score.team} <span class="coach-dash">-</span> ${this.match.score.opponent}`;
-    const perEl = document.querySelector('#coach-period');
-    if (perEl) perEl.textContent = PERIOD_LABELS[this.match.currentPeriod] || '';
+    const perEl = document.querySelector('.coach-period');
+    if (perEl) {
+      const finished = this.match.status === 'finished';
+      const halftime = this.match.currentPeriod === PERIODS.HALF_TIME;
+      perEl.textContent = finished ? 'JOGO TERMINADO' : (halftime ? 'INTERVALO' : (PERIOD_LABELS[this.match.currentPeriod] || ''));
+      perEl.classList.toggle('is-finished', finished);
+    }
   },
 
   /** Reage a tudo o que chega do analista, sem refresh manual. */
@@ -858,7 +876,11 @@ const CoachDashboard = {
   /** O analista confirmou/ignorou a proposta de substituição do banco. */
   _onSubIntentResolved(p) {
     if (!p || !p.status || p.status === 'propose') return;
+    // Resposta antiga a chegar por recuperação de histórico (reconexão) — ignora.
+    if (p.at && Date.now() - p.at > 5 * 60 * 1000) return;
     if (this._pendingSub && p.id && p.id !== this._pendingSub.id) return;
+    // Já não temos proposta em curso e a resposta não é recente: não mostres nada.
+    if (!this._pendingSub && (!p.at || Date.now() - p.at > 30 * 1000)) return;
     this._pendingSub = null;
     if (p.status === 'done') {
       this.renderSubStatus('✅ Substituição confirmada pelo analista', 'done');

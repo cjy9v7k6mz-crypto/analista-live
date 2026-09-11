@@ -864,6 +864,13 @@ const LiveScreen = {
       document.addEventListener('visibilitychange', LiveScreen._bgGuard);
       window.addEventListener('pagehide', LiveScreen._bgGuard);
     }
+
+    // Proposta de substituição que chegou enquanto o analista estava noutro ecrã.
+    if (LiveScreen._stashedSubIntent) {
+      const s = LiveScreen._stashedSubIntent;
+      LiveScreen._stashedSubIntent = null;
+      setTimeout(() => this._onSubIntent(s), 60);
+    }
   },
 
   /** "Aponta" um jogador no ecrã do banco (spotlight partilhado). */
@@ -890,7 +897,8 @@ const LiveScreen = {
    * proposta vinda do banco.
    */
   async commitSubstitution(side, outPlayer, inPlayer) {
-    const parts = AppState.timer.getGameTimeParts();
+    const parts = AppState.timer ? AppState.timer.getGameTimeParts()
+      : { period: this.match.currentPeriod || '1T', minute: 0 };
     this.match.substitutions.push({
       id: Utils.uid('sub'), side, outId: outPlayer.id, inId: inPlayer.id,
       out: outPlayer.name, in: inPlayer.name, period: parts.period, minute: parts.minute,
@@ -913,7 +921,13 @@ const LiveScreen = {
     if (p.status && p.status !== 'propose') return;           // ecos do próprio done/rejected
     if (p.at && Date.now() - p.at > 3 * 60 * 1000) return;    // proposta velha
     const card = document.getElementById('sub-intent-card');
-    if (!card) return;
+    if (!card) {
+      // O analista não está no painel LIVE: guarda a proposta e avisa; será
+      // mostrada assim que o painel abrir.
+      LiveScreen._stashedSubIntent = p;
+      toast('📥 O banco propôs uma substituição — abre o painel do jogo para confirmar');
+      return;
+    }
     const outP = this.findPlayerById(p.outId);
     const inP = this.findPlayerById(p.inId);
     const label = (pl, fallback) => pl ? `${pl.number ? '#' + pl.number + ' ' : ''}${Utils.escapeHtml(pl.shortName || pl.name)}` : Utils.escapeHtml(fallback || '?');
@@ -1022,7 +1036,9 @@ const LiveScreen = {
   /** Envia o estado do jogo (resultado, período, cronómetro) para os outros dispositivos. */
   publishMatchState() {
     if (!this.match) return;
-    SyncCore.publish('match', 'upsert', this.match);
+    // Vai sem o teamSnapshot (fotos) — senão o envelope é pesado e pode não
+    // chegar ao banco, deixando o cronómetro e as substituições por atualizar.
+    SyncCore.publish('match', 'upsert', SyncCore.lightMatch(this.match));
   },
 
   async afterScoreChange(side, isCorrection = false) {
