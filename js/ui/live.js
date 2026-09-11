@@ -45,6 +45,7 @@ const LiveScreen = {
       AppState.timer.start(nextPeriod);
       this.match.currentPeriod = nextPeriod;
       await AppState.persistMatch();
+      this.publishMatchState(); // o banco precisa de saber que a parte mudou
     } else if (AppState.timer.wasRunning) {
       // O jogo estava a decorrer quando a app foi fechada/recarregada: retoma
       // automaticamente, já com o tempo real decorrido recuperado no construtor.
@@ -91,6 +92,7 @@ const LiveScreen = {
           </div>
         </header>
 
+        <div class="sub-intent-card" id="sub-intent-card" hidden></div>
         <div class="onze-strip" id="onze-strip"></div>
 
         <div class="live-body">
@@ -803,18 +805,7 @@ const LiveScreen = {
         multi: false,
       });
       if (!inResult || inResult.players.length === 0) return;
-      const inPlayer = inResult.players[0];
-      const parts = AppState.timer.getGameTimeParts();
-      this.match.substitutions.push({ id: Utils.uid('sub'), side, outId: outPlayer.id, inId: inPlayer.id, out: outPlayer.name, in: inPlayer.name, period: parts.period, minute: parts.minute });
-      await this.recordOccurrence({
-        eventName: `Substituição: ${outPlayer.shortName || outPlayer.name} → ${inPlayer.shortName || inPlayer.name}`,
-        category: 'individual', priority: 'complementary', source: 'substituicao', type: 'neutral', playerIds: [outPlayer.id, inPlayer.id],
-      });
-      await AppState.persistMatch();
-      this.publishMatchState();
-      this.renderHistory();
-      this.renderOnzeStrip();
-      toast('Substituição registada');
+      await this.commitSubstitution(side, outPlayer, inResult.players[0]);
     });
     document.getElementById('more-pair').addEventListener('click', () => {
       dlgMore.close();
@@ -857,6 +848,8 @@ const LiveScreen = {
       LiveScreen._benchInbox = SyncCore.onMessage((env) => {
         if (env.entityType === 'message' && env.payload && env.payload.sender === 'coach') {
           LiveScreen._onBenchMessage(env.payload);
+        } else if (env.entityType === 'sub_intent' && env.payload) {
+          LiveScreen._onSubIntent(env.payload);
         }
       });
     }
@@ -889,6 +882,73 @@ const LiveScreen = {
     Utils.vibrate(25);
     toast(`📥 Banco: ${msg.text || 'nova mensagem'}`);
     if (BenchMessaging._dlg && BenchMessaging._dlg.open) BenchMessaging.renderInbox(this);
+  },
+
+  /**
+   * Regista uma substituição (fonte única: só o analista grava). Chamado tanto
+   * pelo fluxo manual (⋮ → Registar substituição) como pela confirmação de uma
+   * proposta vinda do banco.
+   */
+  async commitSubstitution(side, outPlayer, inPlayer) {
+    const parts = AppState.timer.getGameTimeParts();
+    this.match.substitutions.push({
+      id: Utils.uid('sub'), side, outId: outPlayer.id, inId: inPlayer.id,
+      out: outPlayer.name, in: inPlayer.name, period: parts.period, minute: parts.minute,
+    });
+    await this.recordOccurrence({
+      eventName: `Substituição: ${outPlayer.shortName || outPlayer.name} → ${inPlayer.shortName || inPlayer.name}`,
+      category: 'individual', priority: 'complementary', source: 'substituicao', type: 'neutral',
+      playerIds: [outPlayer.id, inPlayer.id],
+    });
+    await AppState.persistMatch();
+    this.publishMatchState();
+    this.renderHistory();
+    this.renderOnzeStrip();
+    toast('Substituição registada');
+  },
+
+  /** Proposta de substituição vinda do banco: mostra um cartão para confirmar/ignorar. */
+  _onSubIntent(p) {
+    if (!p || !p.id) return;
+    if (p.status && p.status !== 'propose') return;           // ecos do próprio done/rejected
+    if (p.at && Date.now() - p.at > 3 * 60 * 1000) return;    // proposta velha
+    const card = document.getElementById('sub-intent-card');
+    if (!card) return;
+    const outP = this.findPlayerById(p.outId);
+    const inP = this.findPlayerById(p.inId);
+    const label = (pl, fallback) => pl ? `${pl.number ? '#' + pl.number + ' ' : ''}${Utils.escapeHtml(pl.shortName || pl.name)}` : Utils.escapeHtml(fallback || '?');
+    card.innerHTML = `
+      <div class="sub-intent-body">
+        <span class="sub-intent-tag">📥 O banco propõe</span>
+        <span class="sub-intent-move">Sai <strong>${label(outP, p.outName)}</strong> · Entra <strong>${label(inP, p.inName)}</strong></span>
+      </div>
+      <div class="sub-intent-actions">
+        <button class="btn btn-small" data-si="ignore">Ignorar</button>
+        <button class="btn btn-primary btn-small" data-si="confirm">Confirmar e registar</button>
+      </div>`;
+    card.hidden = false;
+    Utils.vibrate(30);
+    toast('📥 Proposta de substituição do banco');
+    card.querySelector('[data-si="ignore"]').onclick = () => this._resolveSubIntent(p, 'rejected');
+    card.querySelector('[data-si="confirm"]').onclick = () => this._resolveSubIntent(p, 'done');
+  },
+
+  async _resolveSubIntent(p, status) {
+    const card = document.getElementById('sub-intent-card');
+    if (card) card.hidden = true;
+    if (status === 'done') {
+      const side = 'own'; // o banco só propõe sobre a nossa equipa
+      const st = LineupState.compute(this.match, side);
+      const outP = this.ownPlayers.find((x) => x.id === p.outId);
+      const inP = this.ownPlayers.find((x) => x.id === p.inId);
+      if (!outP || !inP || !st.onFieldIds.has(p.outId) || st.subbedOffIds.has(p.inId) || st.onFieldIds.has(p.inId)) {
+        toast('Já não dá para fazer esta troca (o jogo mudou).');
+        SyncCore.publish('sub_intent', 'resolve', { ...p, status: 'rejected' });
+        return;
+      }
+      await this.commitSubstitution(side, outP, inP);
+    }
+    SyncCore.publish('sub_intent', 'resolve', { ...p, status });
   },
 
   updateBenchBadge() {

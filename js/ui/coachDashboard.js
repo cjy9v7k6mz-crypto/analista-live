@@ -33,6 +33,8 @@ const CoachDashboard = {
       return this.renderJoin(root, session);
     }
     this.session = session;
+    this.role = session.coachRole || 'adjunto';
+    if (!this._filterSetByUser) this.filter = this.roleDefaultFilter();
     await this.loadData();
 
     root.innerHTML = this.template();
@@ -61,6 +63,13 @@ const CoachDashboard = {
           <h2>Entrar num jogo</h2>
           <p class="muted">Pede ao analista o código de 6 caracteres que aparece em “Ligar Dispositivo”.</p>
           <input id="coach-code" class="coach-code-input" maxlength="6" placeholder="ABC123" autocapitalize="characters" autocomplete="off" value="${Utils.escapeHtml(codeFromUrl)}">
+          <label class="field"><span>A tua função</span>
+            <select id="coach-role">
+              <option value="adjunto">Adjunto — vista completa</option>
+              <option value="principal">Treinador — só o essencial</option>
+              <option value="gr">Treinador de GR — foco defensivo</option>
+            </select>
+          </label>
           <p class="ng-error" id="coach-error" hidden></p>
           <button class="btn btn-primary btn-block btn-lg" id="coach-join">Entrar</button>
           ${session && session.role === SyncCore.ROLES.COACH
@@ -89,10 +98,15 @@ const CoachDashboard = {
       const e0 = err(); if (e0) e0.hidden = true;
       setBtn(true, 'A ligar…');
 
+      const role = document.getElementById('coach-role')?.value || 'adjunto';
       try {
         const cloud = await SyncTransports.isCloud();
         const transport = await SyncTransports.pick();
         await SyncCore.joinSession(code, transport);
+        if (SyncCore.session) {
+          SyncCore.session.coachRole = role;
+          try { await DB.put(DB.STORES.sessions, SyncCore.session); } catch (e) { /* ignora */ }
+        }
 
         // Espera pelo estado do jogo, informando o que está a acontecer em vez
         // de deixar o ecrã parado sem explicação.
@@ -149,7 +163,7 @@ const CoachDashboard = {
     const halftime = m.currentPeriod === PERIODS.HALF_TIME;
 
     return `
-      <div class="screen coach-screen">
+      <div class="screen coach-screen" data-role="${this.role || 'adjunto'}">
         <header class="coach-top">
           <div class="coach-scoreline">
             <span class="coach-team">${Utils.escapeHtml(m.team)}</span>
@@ -158,13 +172,14 @@ const CoachDashboard = {
           </div>
           <div class="coach-clock-row">
             <button class="btn btn-tiny" id="coach-exit" title="Sair do Modo Banco">✕ Sair</button>
+            <button class="btn btn-tiny coach-role-chip" id="coach-role-chip" title="Mudar de função">👤 ${this.ROLE_LABELS[this.role] || 'Adjunto'}</button>
             <span class="coach-clock" id="coach-clock">--:--</span>
             <span class="coach-period ${finished ? 'is-finished' : ''}">${finished ? 'JOGO TERMINADO' : (halftime ? 'INTERVALO' : periodLabel)}</span>
             <span class="conn-badge" id="coach-conn">•</span>
           </div>
         </header>
 
-        ${halftime || finished ? `<div class="coach-banner">${finished ? '⏹ Jogo terminado — resumo abaixo' : '⏱ Intervalo — resumo da parte'}</div>` : ''}
+        <div id="coach-period-summary"></div>
 
         <div class="coach-body">
           <section class="coach-stats">
@@ -176,7 +191,7 @@ const CoachDashboard = {
             <div class="coach-pitch-wrap" id="coach-pitch"></div>
             <div class="coach-feed-wrap">
               <div class="coach-filters">
-                ${[['all', 'Todos'], ['own', m.team], ['opponent', m.opponent], ['important', 'Importantes'], ['moments', '⭐ Momentos']]
+                ${[['all', 'Todos'], ['own', m.team], ['opponent', m.opponent], ['important', 'Importantes'], ['moments', '⭐ Momentos'], ['gr', '🧤 GR']]
                   .map(([k, l]) => `<button class="coach-filter ${this.filter === k ? 'active' : ''}" data-filter="${k}">${Utils.escapeHtml(l)}</button>`).join('')}
               </div>
               <div class="coach-filters coach-filters-time">
@@ -189,6 +204,8 @@ const CoachDashboard = {
 
           <aside class="coach-side">
             <button class="btn btn-primary btn-block btn-lg" id="coach-save-moment">⭐ Guardar Momento</button>
+            <button class="btn btn-block" id="coach-propose-sub">🔁 Propor substituição</button>
+            <div class="coach-sub-status" id="coach-sub-status" hidden></div>
             <button class="btn btn-block" id="coach-talk">📣 Falar com o analista</button>
             <h3 class="coach-side-title">Conversa com o analista</h3>
             <div class="coach-messages" id="coach-messages"></div>
@@ -197,6 +214,20 @@ const CoachDashboard = {
 
         <div class="coach-toast" id="coach-toast" hidden></div>
         <div class="coach-spotlight-banner" id="coach-spotlight" hidden></div>
+
+        <dialog id="dlg-coach-sub" class="dialog">
+          <div class="dialog-card">
+            <div class="stats-head"><h3>🔁 Propor substituição</h3><button type="button" class="icon-btn" id="coach-sub-close">✕</button></div>
+            <p class="muted">O analista confirma e regista. Serve para alinharem a alteração.</p>
+            <p class="field-label">Sai</p>
+            <div class="coach-sub-grid" id="coach-sub-out"></div>
+            <p class="field-label">Entra</p>
+            <div class="coach-sub-grid" id="coach-sub-in"></div>
+            <div class="dialog-actions">
+              <button type="button" class="btn btn-primary" id="coach-sub-send" disabled>Enviar proposta</button>
+            </div>
+          </div>
+        </dialog>
 
         <dialog id="dlg-coach-moment" class="dialog">
           <div class="dialog-card">
@@ -232,6 +263,137 @@ const CoachDashboard = {
     { icon: '🎯', text: 'Onde estão a aparecer os espaços deles?' },
   ],
 
+  // ---------- Funções (papéis) no banco ----------
+  ROLE_LABELS: { principal: 'Treinador', adjunto: 'Adjunto', gr: 'Treinador de GR' },
+  ROLES_ORDER: ['adjunto', 'principal', 'gr'],
+  role: 'adjunto',
+
+  roleDefaultFilter() {
+    if (this.role === 'principal') return 'important';
+    if (this.role === 'gr') return 'gr';
+    return 'all';
+  },
+
+  async setRole(role) {
+    this.role = role;
+    this.filter = this.roleDefaultFilter();
+    if (this.session) {
+      this.session.coachRole = role;
+      try { await DB.put(DB.STORES.sessions, this.session); } catch (e) { /* ignora */ }
+    }
+    this.repaint();
+  },
+
+  cycleRole() {
+    const i = this.ROLES_ORDER.indexOf(this.role);
+    this.setRole(this.ROLES_ORDER[(i + 1) % this.ROLES_ORDER.length]);
+  },
+
+  // ---------- Resumo de período (empurrado no intervalo / fim) ----------
+  renderPeriodSummary() {
+    const box = document.getElementById('coach-period-summary');
+    if (!box || !this.match) return;
+    const finished = this.match.status === 'finished';
+    const halftime = this.match.currentPeriod === PERIODS.HALF_TIME;
+    if (!finished && !halftime) { box.innerHTML = ''; box.hidden = true; return; }
+    box.hidden = false;
+
+    const counts = {};
+    this.occurrences.forEach((o) => { if (o.planEventId) counts[o.planEventId] = (counts[o.planEventId] || 0) + 1; });
+    const withCounts = (this.match.observationPlan || [])
+      .map((e) => ({ ...e, count: counts[e.id] || 0 })).filter((e) => e.count > 0);
+    const trendCfg = (window.AppState && AppState.settings && AppState.settings.trendConfig) || undefined;
+    const problems = withCounts.filter((e) => e.type === 'negative').sort((a, b) => b.count - a.count).slice(0, 5);
+    const positives = withCounts.filter((e) => e.type === 'positive').sort((a, b) => b.count - a.count).slice(0, 5);
+    const trending = withCounts.filter((e) => Utils.getTrendLevel(e.count, trendCfg).showBadge).sort((a, b) => b.count - a.count).slice(0, 5);
+    const bench = this.occurrences.filter((o) => o.source === 'banco');
+    const moments = this.occurrences.filter((o) => o.source === 'momento');
+
+    const list = (arr, fn) => arr.length ? arr.map(fn).join('') : '<p class="muted">—</p>';
+    box.innerHTML = `
+      <div class="coach-summary ${finished ? 'is-finished' : ''}">
+        <div class="coach-summary-head">
+          <span>${finished ? '⏹ FIM DO JOGO' : '⏱ INTERVALO'}</span>
+          <strong>${Utils.escapeHtml(this.match.team)} ${this.match.score.team} - ${this.match.score.opponent} ${Utils.escapeHtml(this.match.opponent)}</strong>
+          <button class="btn btn-tiny" id="coach-summary-collapse">Ver detalhe ▾</button>
+        </div>
+        <div class="coach-summary-grid" id="coach-summary-grid">
+          <section><h4>🔴 Problemas</h4>${list(problems, (e) => `<div class="cs-line"><span>${Utils.escapeHtml(e.name)}</span><strong>${e.count}×</strong></div>`)}</section>
+          <section><h4>🟢 Positivos</h4>${list(positives, (e) => `<div class="cs-line"><span>${Utils.escapeHtml(e.name)}</span><strong>${e.count}×</strong></div>`)}</section>
+          <section><h4>⚠️ Tendências</h4>${list(trending, (e) => `<div class="cs-line"><span>${Utils.escapeHtml(e.name)}</span><strong>${e.count}× ${Utils.getTrendLevel(e.count, trendCfg).label}</strong></div>`)}</section>
+          <section><h4>🚨 Banco</h4>${list(bench.slice(-5), (o) => `<div class="cs-line"><span>${String(o.minute).padStart(2, '0')}' ${Utils.escapeHtml(o.eventName)}</span></div>`)}</section>
+          <section><h4>⭐ Momentos</h4>${list(moments.slice(-5), (o) => `<div class="cs-line"><span>${String(o.minute).padStart(2, '0')}'</span>${o.note ? `<span class="muted">"${Utils.escapeHtml(o.note)}"</span>` : ''}</div>`)}</section>
+        </div>
+      </div>`;
+    const grid = box.querySelector('#coach-summary-grid');
+    const btn = box.querySelector('#coach-summary-collapse');
+    btn.addEventListener('click', () => {
+      const hidden = grid.hasAttribute('hidden');
+      if (hidden) { grid.removeAttribute('hidden'); btn.textContent = 'Esconder ▴'; }
+      else { grid.setAttribute('hidden', ''); btn.textContent = 'Ver detalhe ▾'; }
+    });
+  },
+
+  // ---------- Propor substituição ----------
+  openSubProposeSheet() {
+    const dlg = document.getElementById('dlg-coach-sub');
+    if (!dlg) return;
+    const ownTeamId = this.match.teams?.own?.teamId;
+    const players = this.players.filter((p) => p.teamId === ownTeamId);
+    const state = LineupState.compute(this.match, 'own');
+    const onField = players.filter((p) => state.onFieldIds.has(p.id));
+    const benchPool = players.filter((p) => !state.onFieldIds.has(p.id) && !state.subbedOffIds.has(p.id));
+
+    let outId = null; let inId = null;
+    const chip = (p, kind) => `<button class="coach-sub-chip" data-${kind}="${p.id}">${p.number ? '#' + p.number + ' ' : ''}${Utils.escapeHtml(p.shortName || p.name)}</button>`;
+    dlg.querySelector('#coach-sub-out').innerHTML = onField.length ? onField.map((p) => chip(p, 'out')).join('') : '<p class="muted">Onze não definido.</p>';
+    dlg.querySelector('#coach-sub-in').innerHTML = benchPool.length ? benchPool.map((p) => chip(p, 'in')).join('') : '<p class="muted">Sem suplentes disponíveis.</p>';
+
+    const sendBtn = dlg.querySelector('#coach-sub-send');
+    const refresh = () => { sendBtn.disabled = !(outId && inId); };
+    dlg.querySelectorAll('[data-out]').forEach((b) => b.addEventListener('click', () => {
+      outId = b.dataset.out;
+      dlg.querySelectorAll('[data-out]').forEach((x) => x.classList.toggle('selected', x === b));
+      refresh();
+    }));
+    dlg.querySelectorAll('[data-in]').forEach((b) => b.addEventListener('click', () => {
+      inId = b.dataset.in;
+      dlg.querySelectorAll('[data-in]').forEach((x) => x.classList.toggle('selected', x === b));
+      refresh();
+    }));
+    sendBtn.onclick = () => {
+      const outP = players.find((p) => p.id === outId);
+      const inP = players.find((p) => p.id === inId);
+      this.sendSubIntent(outP, inP);
+      dlg.close();
+    };
+    dlg.showModal();
+  },
+
+  sendSubIntent(outP, inP) {
+    if (!outP || !inP) return;
+    this._pendingSub = {
+      id: Utils.uid('si'),
+      status: 'propose',
+      outId: outP.id, inId: inP.id,
+      outName: outP.name, inName: inP.name,
+      minute: this.currentMinute(),
+      at: Date.now(),
+    };
+    SyncCore.publish('sub_intent', 'propose', this._pendingSub);
+    this.renderSubStatus('⏳ Proposta enviada — à espera do analista', 'pending');
+    this.flash('Proposta de substituição enviada');
+  },
+
+  renderSubStatus(text, kind) {
+    const el = document.getElementById('coach-sub-status');
+    if (!el) return;
+    if (!text) { el.hidden = true; el.innerHTML = ''; return; }
+    el.hidden = false;
+    el.className = `coach-sub-status is-${kind || 'pending'}`;
+    el.innerHTML = Utils.escapeHtml(text);
+  },
+
   filteredEvents() {
     const nowMin = this.currentMinute();
     return this.occurrences
@@ -240,6 +402,8 @@ const CoachDashboard = {
         if (this.filter === 'opponent') return o.team === 'opponent';
         if (this.filter === 'important') return o.priority === 'critical' || ['golo', 'cartao', 'substituicao', 'momento'].includes(o.source);
         if (this.filter === 'moments') return o.source === 'momento' || o.meta?.moment || o.coachSaved;
+        if (this.filter === 'gr') return o.source === 'defesa' || o.source === 'golo'
+          || (o.team === 'opponent' && ['remate', 'canto', 'falta'].includes(o.source));
         return true;
       })
       .filter((o) => {
@@ -535,6 +699,8 @@ const CoachDashboard = {
     this.renderPitch();
     this.renderMomentum();
     this.renderStats();
+    this.renderPeriodSummary();
+    if (this._pendingSub) this.renderSubStatus('⏳ Proposta enviada — à espera do analista', 'pending');
     const feed = document.getElementById('coach-feed');
     if (feed) feed.scrollTop = scroll;
   },
@@ -542,9 +708,13 @@ const CoachDashboard = {
   bind() {
     document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
       this.filter = b.dataset.filter;
+      this._filterSetByUser = true;
       document.querySelectorAll('[data-filter]').forEach((x) => x.classList.toggle('active', x === b));
       this.renderFeed();
     }));
+    document.getElementById('coach-role-chip').addEventListener('click', () => this.cycleRole());
+    document.getElementById('coach-propose-sub').addEventListener('click', () => this.openSubProposeSheet());
+    document.getElementById('coach-sub-close').addEventListener('click', () => document.getElementById('dlg-coach-sub').close());
     document.querySelectorAll('[data-time]').forEach((b) => b.addEventListener('click', () => {
       this.timeFilter = b.dataset.time;
       document.querySelectorAll('[data-time]').forEach((x) => x.classList.toggle('active', x === b));
@@ -588,6 +758,8 @@ const CoachDashboard = {
     this.renderPitch();
     this.renderMomentum();
     this.renderStats();
+    this.renderPeriodSummary();
+    if (this._pendingSub) this.renderSubStatus('⏳ Proposta enviada — à espera do analista', 'pending');
     this.paintConnection(SyncCore.status);
   },
 
@@ -657,6 +829,8 @@ const CoachDashboard = {
       SyncCore.onMessage(async (env) => {
         // O spotlight é efémero — não mexe nos dados, só acende um jogador.
         if (env.entityType === 'spotlight') { this.receiveSpotlight(env.payload); return; }
+        // Resposta do analista à nossa proposta de substituição.
+        if (env.entityType === 'sub_intent') { this._onSubIntentResolved(env.payload); return; }
 
         // Qualquer outro envelope faz o banco reler o estado do jogo a partir da
         // base de dados local. É barato e elimina a dependência de um tipo
@@ -669,6 +843,7 @@ const CoachDashboard = {
         this.renderPitch();
         this.renderMomentum();
         this.renderStats();
+        this.renderPeriodSummary();
 
         if (env.entityType === 'occurrence' && env.payload?.source === 'golo') {
           this.flash('⚽ ' + (env.payload.eventName || 'Golo'));
@@ -678,6 +853,21 @@ const CoachDashboard = {
         }
       }),
     ];
+  },
+
+  /** O analista confirmou/ignorou a proposta de substituição do banco. */
+  _onSubIntentResolved(p) {
+    if (!p || !p.status || p.status === 'propose') return;
+    if (this._pendingSub && p.id && p.id !== this._pendingSub.id) return;
+    this._pendingSub = null;
+    if (p.status === 'done') {
+      this.renderSubStatus('✅ Substituição confirmada pelo analista', 'done');
+      this.flash('✅ Substituição confirmada');
+    } else {
+      this.renderSubStatus('✋ Proposta não avançou', 'rejected');
+      this.flash('O analista não avançou com a troca');
+    }
+    setTimeout(() => this.renderSubStatus(''), 6000);
   },
 };
 
