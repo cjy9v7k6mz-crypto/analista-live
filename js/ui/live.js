@@ -120,6 +120,9 @@ const LiveScreen = {
                 <h3>Histórico</h3>
                 <button class="btn btn-tiny" id="btn-open-history">Ver tudo</button>
               </div>
+              <!-- Sempre à mão: corrigir um engano custa 1 toque, e repetir o
+                   registo anterior evita refazer o percurso todo. -->
+              <div class="history-quickbar" id="history-quickbar"></div>
               <div class="history-feed" id="history-feed"></div>
             </div>
           </aside>
@@ -175,6 +178,14 @@ const LiveScreen = {
           </div>
           <div id="tmap-body"></div>
           <div class="dialog-actions"><button type="button" class="btn" id="tmap-close2">Fechar</button></div>
+        </div>
+      </dialog>
+
+      <dialog id="dlg-patterns" class="dialog dialog-wide">
+        <div class="dialog-card">
+          <div class="stats-head"><h3>🔗 Padrões do Jogo</h3><button type="button" class="icon-btn" id="pat-close">✕</button></div>
+          <div id="pat-body"></div>
+          <div class="dialog-actions"><button type="button" class="btn" id="pat-close2">Fechar</button></div>
         </div>
       </dialog>
 
@@ -443,6 +454,7 @@ const LiveScreen = {
           <span class="bola-bar-actions">
             <button class="btn btn-tiny" id="bola-undo" ${all.length ? '' : 'disabled'}>↶ Desfazer</button>
             <button class="btn btn-tiny" id="bola-map">🗺 Mapa</button>
+            <button class="btn btn-tiny" id="bola-patterns">🔗 Padrões</button>
           </span>
         </div>
       </div>`;
@@ -455,6 +467,7 @@ const LiveScreen = {
     });
     document.getElementById('bola-undo').addEventListener('click', () => this.undoLastTransition());
     document.getElementById('bola-map').addEventListener('click', () => this.openTransitionsMap());
+    document.getElementById('bola-patterns').addEventListener('click', () => this.openPatterns());
     this._bolaOnField = { own, opp };
   },
 
@@ -555,9 +568,141 @@ const LiveScreen = {
     const recent = [...this.occurrences].sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
     if (recent.length === 0) {
       feed.innerHTML = '<p class="muted">Sem registos ainda.</p>';
+      this.renderQuickBar();
       return;
     }
     feed.innerHTML = recent.map((o) => this.historyRow(o)).join('');
+    // A barra acompanha sempre o histórico: quem chama um, atualiza o outro.
+    this.renderQuickBar();
+  },
+
+  // ---------- Desfazer global · Repetir último ----------
+
+  /** Fontes que se repetem tal e qual. Ficam de fora as que mexem no placar,
+   *  nos cartões ou no onze — essas exigem o fluxo completo, não um atalho. */
+  REPEATABLE_SOURCES: ['event', 'momento', 'perda', 'recuperacao', 'nota', 'banco'],
+
+  lastOccurrence() {
+    return [...this.occurrences].sort((a, b) => b.timestamp - a.timestamp)[0] || null;
+  },
+
+  lastRepeatable() {
+    return [...this.occurrences]
+      .filter((o) => this.REPEATABLE_SOURCES.includes(o.source))
+      .sort((a, b) => b.timestamp - a.timestamp)[0] || null;
+  },
+
+  renderQuickBar() {
+    const bar = document.getElementById('history-quickbar');
+    if (!bar) return;
+    const last = this.lastOccurrence();
+    const rep = this.lastRepeatable();
+    const short = (s, n = 18) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+    bar.innerHTML = `
+      <button class="btn btn-tiny btn-undo" id="btn-undo-last" ${last ? '' : 'disabled'}
+              title="${last ? 'Remover: ' + Utils.escapeHtml(last.eventName) : 'Nada para desfazer'}">↶ Desfazer</button>
+      <button class="btn btn-tiny" id="btn-repeat-last" ${rep ? '' : 'disabled'}
+              title="${rep ? 'Repetir: ' + Utils.escapeHtml(rep.eventName) : 'Nada para repetir'}">↻ ${rep ? Utils.escapeHtml(short(rep.eventName)) : 'Repetir'}</button>
+    `;
+    const undo = document.getElementById('btn-undo-last');
+    const repeat = document.getElementById('btn-repeat-last');
+    if (undo) undo.addEventListener('click', () => this.undoLast());
+    if (repeat) repeat.addEventListener('click', () => this.repeatLast());
+  },
+
+  /**
+   * Remove o último registo, seja de que tipo for, desfazendo também o efeito
+   * que ele teve fora da lista de ocorrências (placar, cartões, substituições).
+   * Sem confirmação de propósito — em jogo, corrigir tem de custar um toque; o
+   * aviso diz o que saiu para não haver dúvida.
+   */
+  async undoLast() {
+    const occ = this.lastOccurrence();
+    if (!occ) return;
+
+    // 1 — Placar: tanto o golo do toque rápido como o remate marcado "Golo"
+    //    incrementaram o resultado — desfazer um tem de o repor.
+    const scoredGoal = (occ.source === 'golo')
+      || (occ.source === 'remate' && occ.meta?.result === 'goal');
+    if (scoredGoal && occ.team && this.match.score) {
+      const key = occ.team === 'own' ? 'team' : 'opponent';
+      this.match.score[key] = Math.max(0, (this.match.score[key] || 0) - 1);
+    }
+    // 2 — Cartão: sai também da lista de cartões do jogo.
+    if (occ.source === 'cartao') {
+      const pid = (occ.playerIds || [])[0];
+      const idx = [...(this.match.cards || [])].map((c, i) => ({ c, i }))
+        .filter(({ c }) => !pid || c.playerId === pid).pop();
+      if (idx) this.match.cards.splice(idx.i, 1);
+    }
+    // 3 — Substituição: repor o onze significa remover a substituição — o
+    //    LineupState volta a derivar o estado correto sozinho.
+    if (occ.source === 'substituicao') {
+      const [outId, inId] = occ.playerIds || [];
+      const idx = [...(this.match.substitutions || [])].map((s, i) => ({ s, i }))
+        .filter(({ s }) => s.outId === outId && s.inId === inId).pop();
+      if (idx) this.match.substitutions.splice(idx.i, 1);
+    }
+
+    await AppState.deleteOccurrence(occ.id);
+    this.occurrences = this.occurrences.filter((o) => o.id !== occ.id);
+    SyncCore.publish('occurrence', 'delete', { id: occ.id });
+    await AppState.persistMatch();
+    this.publishMatchState();
+
+    this.updateTopBar();
+    const scoreEl = document.querySelector('#live-score [data-team="team"]');
+    if (scoreEl) {
+      scoreEl.textContent = this.match.score.team;
+      document.querySelector('#live-score [data-team="opponent"]').textContent = this.match.score.opponent;
+    }
+    this.renderButtons();
+    this.renderFocosStrip();
+    this.renderOnzeStrip();
+    this.renderHistory();
+    if (this.activeCategory === 'bola') this.renderBolaPanel();
+    this.renderStatsIfOpen();
+    Utils.vibrate(20);
+    toast(`Removido: ${occ.eventName}`);
+  },
+
+  /** Repete o último registo repetível, com os mesmos dados, na hora atual. */
+  async repeatLast() {
+    const src = this.lastRepeatable();
+    if (!src) return;
+    await this.recordOccurrence({
+      eventName: src.eventName,
+      category: src.category,
+      priority: src.priority,
+      source: src.source,
+      type: src.eventType,
+      note: src.note,
+      planEventId: src.planEventId,
+      playerIds: [...(src.playerIds || [])],
+      team: src.team,
+      // Cópia rasa basta: `meta` só tem valores simples e `location` é
+      // substituída por uma nova cópia para os dois registos não partilharem
+      // o mesmo objeto.
+      meta: src.meta ? { ...src.meta, ...(src.meta.location ? { location: { ...src.meta.location } } : {}) } : null,
+    });
+    this.renderButtons();
+    this.renderFocosStrip();
+    this.renderHistory();
+    if (this.activeCategory === 'bola') this.renderBolaPanel();
+    this.renderStatsIfOpen();
+    toast(`Repetido: ${src.eventName}`);
+  },
+
+  /** Padrões do jogo — leitura derivada, sem pedir nenhum registo novo. */
+  openPatterns() {
+    const dlg = document.getElementById('dlg-patterns');
+    if (!dlg) return;
+    dlg.querySelector('#pat-body').innerHTML = MatchStats.renderPatternsHTML(
+      this.occurrences, this.match, (id) => {
+        const p = this.findPlayerById(id);
+        return p ? (p.shortName || p.name) : null;
+      });
+    dlg.showModal();
   },
 
   historyRow(o) {
@@ -935,6 +1080,11 @@ const LiveScreen = {
     const dlgTmap = document.getElementById('dlg-transitions-map');
     document.getElementById('tmap-close').addEventListener('click', () => dlgTmap.close());
     document.getElementById('tmap-close2').addEventListener('click', () => dlgTmap.close());
+
+    // Padrões do jogo (leitura derivada)
+    const dlgPat = document.getElementById('dlg-patterns');
+    document.getElementById('pat-close').addEventListener('click', () => dlgPat.close());
+    document.getElementById('pat-close2').addEventListener('click', () => dlgPat.close());
 
     // MAIS (correção de minuto, compensação, cartões, substituições, modo gestão)
     const dlgMore = document.getElementById('dlg-more');

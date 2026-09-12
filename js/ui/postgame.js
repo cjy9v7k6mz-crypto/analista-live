@@ -60,6 +60,14 @@ const PostgameScreen = {
           <section class="ht-card">${MatchStats.renderTransitionsMapHTML(occurrences, match.team, match.opponent)}</section>
         </div>
 
+        <section class="once-panel">
+          <h2>🔗 Padrões do Jogo</h2>
+          ${MatchStats.renderPatternsHTML(occurrences, match, (id) => {
+            const p = allPlayers.find((x) => x.id === id);
+            return p ? (p.shortName || p.name) : null;
+          })}
+        </section>
+
         <div class="halftime-grid">
           <section class="ht-card ht-card-problems">
             <h2>🔴 Principais Problemas</h2>

@@ -254,6 +254,269 @@ const MatchStats = {
       </div>`;
   },
 
+  // ---------- Padrões (leitura derivada — não pede nenhum registo novo) ----------
+  //
+  // Tudo o que está abaixo é calculado a partir de ocorrências que já existem.
+  // Não há aqui nenhum dado novo a pedir ao analista: só se lê melhor o que ele
+  // já registou. Se um número não puder ser sustentado pelos registos, não é
+  // mostrado (devolve-se `total: 0`) — nunca se estima.
+
+  /** Janelas de tempo (segundos) usadas para ligar acontecimentos em cadeia. */
+  CHAIN_WINDOW: { transition: 30, costlyLoss: 20 },
+
+  /** Segundos entre duas ocorrências, usando o relógio de jogo (minuto+segundo). */
+  _gapSeconds(a, b) {
+    const secs = (o) => (o.minute || 0) * 60 + (o.second || 0);
+    return secs(b) - secs(a);
+  },
+
+  /**
+   * Eficácia de bolas paradas, usando as ligações que já gravamos no remate
+   * (`meta.fromCornerId` / `meta.fromFoulId`). Um canto/livre só conta como
+   * "com remate" se existir mesmo um remate ligado — não se infere pelo
+   * resultado escrito no canto.
+   *
+   * CUIDADO COM O DENOMINADOR: um canto é sempre uma bola parada ofensiva, por
+   * isso a eficácia sobre o total de cantos é justa. Um LIVRE não — a maioria
+   * são recomeços a meio-campo onde rematar nunca foi opção, e metê-los no
+   * denominador faria a eficácia parecer péssima sem razão. Por isso a eficácia
+   * dos livres é calculada só sobre os que estavam em zona de remate (pela
+   * localização já registada na falta) mais os que, de facto, deram remate —
+   * se deu remate, era rematável, venha de onde vier. Os livres fora dessa zona
+   * e os que não têm localização são contados à parte, nunca diluídos na conta.
+   */
+  setPieceChains(occurrences) {
+    const shots = this.shotsList(occurrences);
+    const linked = (key, id) => shots.filter((s) => s.meta && s.meta[key] === id);
+    /** @param {(occ)=>boolean|null} inShootingZone - null = todas contam (cantos). */
+    const build = (list, key, inShootingZone = null) => {
+      const rows = list.map((o) => {
+        const ss = linked(key, o.id);
+        return { occ: o, shots: ss, goals: ss.filter((s) => s.meta?.result === 'goal').length };
+      });
+      // Base da eficácia: só as jogadas em que rematar era mesmo uma opção.
+      const base = inShootingZone
+        ? rows.filter((r) => inShootingZone(r.occ) || r.shots.length)
+        : rows;
+      const baseWithShot = base.filter((r) => r.shots.length).length;
+      return {
+        total: rows.length,
+        withShot: rows.filter((r) => r.shots.length).length,
+        goals: rows.reduce((n, r) => n + r.goals, 0),
+        // `base*` = o subconjunto sobre o qual a % faz sentido.
+        base: base.length,
+        baseWithShot,
+        baseGoals: base.reduce((n, r) => n + r.goals, 0),
+        shotPct: base.length ? Math.round((baseWithShot / base.length) * 100) : 0,
+        outOfZone: rows.length - base.length,
+        noLocation: rows.filter((r) => r.occ.meta?.location?.y == null && !r.shots.length).length,
+        rows,
+      };
+    };
+    // Zona de remate de um livre, do ponto de vista de quem o vai bater:
+    // para nós é o terço ofensivo (y baixo); para o adversário, o nosso terço
+    // defensivo (y alto) — é o mesmo sítio do campo visto do outro lado.
+    const zoneFor = (side) => (o) => this.thirdOf(o.meta?.location?.y) === (side === 'own' ? 'att' : 'def');
+    const corners = occurrences.filter((o) => o.source === 'canto');
+    const fouls = this.foulsList(occurrences)
+      .filter((o) => (o.meta?.consequences || []).includes('freeKick'));
+    return {
+      own: {
+        corners: build(corners.filter((o) => o.team === 'own'), 'fromCornerId'),
+        // Falta cometida PELO adversário -> o livre é nosso.
+        freeKicks: build(fouls.filter((o) => o.team === 'opponent'), 'fromFoulId', zoneFor('own')),
+      },
+      opponent: {
+        corners: build(corners.filter((o) => o.team === 'opponent'), 'fromCornerId'),
+        freeKicks: build(fouls.filter((o) => o.team === 'own'), 'fromFoulId', zoneFor('opponent')),
+      },
+    };
+  },
+
+  /**
+   * Velocidade de transição ofensiva: de cada recuperação nossa até ao primeiro
+   * remate nosso dentro da janela. Só conta pares dentro do mesmo período —
+   * um remate no 2T não pode "resultar" de uma recuperação do 1T.
+   */
+  transitionSpeed(occurrences) {
+    const recs = this.transitionsList(occurrences)
+      .filter((o) => o.source === 'recuperacao')
+      .sort((a, b) => a.timestamp - b.timestamp);
+    const shots = this.shotsList(occurrences).filter((s) => s.team === 'own');
+    const win = this.CHAIN_WINDOW.transition;
+    const pairs = [];
+    recs.forEach((r) => {
+      const hit = shots
+        .filter((s) => s.period === r.period)
+        .map((s) => ({ s, gap: this._gapSeconds(r, s) }))
+        .filter((x) => x.gap >= 0 && x.gap <= win)
+        .sort((a, b) => a.gap - b.gap)[0];
+      if (hit) pairs.push({ rec: r, shot: hit.s, seconds: hit.gap, goal: hit.s.meta?.result === 'goal' });
+    });
+    const secs = pairs.map((p) => p.seconds).sort((a, b) => a - b);
+    return {
+      recoveries: recs.length,
+      converted: pairs.length,
+      pct: recs.length ? Math.round((pairs.length / recs.length) * 100) : 0,
+      goals: pairs.filter((p) => p.goal).length,
+      medianSeconds: secs.length ? secs[Math.floor(secs.length / 2)] : null,
+      pairs,
+    };
+  },
+
+  /**
+   * Perdas que custaram caro: perda nossa seguida de golo sofrido dentro da
+   * janela. Serve para isolar o erro que pesou no resultado, não para culpar —
+   * por isso guarda-se também o jogador, só quando ele foi mesmo registado.
+   */
+  costlyLosses(occurrences, match) {
+    const losses = this.transitionsList(occurrences).filter((o) => o.source === 'perda');
+    const win = this.CHAIN_WINDOW.costlyLoss;
+    // Golos sofridos: pelo placar (source 'golo', team 'opponent') ou por um
+    // remate do adversário marcado como golo. São fluxos distintos (ver compute).
+    const conceded = occurrences.filter((o) =>
+      (o.source === 'golo' && o.team === 'opponent' && !o.meta?.ownGoal)
+      || (o.source === 'remate' && o.team === 'opponent' && o.meta?.result === 'goal'));
+    const out = [];
+    losses.forEach((l) => {
+      const g = conceded
+        .filter((c) => c.period === l.period)
+        .map((c) => ({ c, gap: this._gapSeconds(l, c) }))
+        .filter((x) => x.gap >= 0 && x.gap <= win)
+        .sort((a, b) => a.gap - b.gap)[0];
+      if (g) out.push({ loss: l, goal: g.c, seconds: g.gap, playerId: l.meta?.ownPlayerId || null });
+    });
+    return { total: out.length, items: out };
+  },
+
+  /**
+   * Onde cada jogador perde a bola. Só entram perdas com jogador identificado —
+   * as anónimas ficam de fora em vez de serem atribuídas a alguém.
+   */
+  lossZonesByPlayer(occurrences) {
+    const byPlayer = new Map();
+    this.transitionsList(occurrences)
+      .filter((o) => o.source === 'perda' && o.meta?.ownPlayerId)
+      .forEach((o) => {
+        const id = o.meta.ownPlayerId;
+        if (!byPlayer.has(id)) byPlayer.set(id, { playerId: id, def: 0, mid: 0, att: 0, total: 0 });
+        const row = byPlayer.get(id);
+        const t = this.thirdOf(o.meta?.location?.y);
+        if (t) row[t]++;
+        row.total++;
+      });
+    return [...byPlayer.values()].sort((a, b) => b.total - a.total);
+  },
+
+  /**
+   * Bloco único de "padrões" — usado no LIVE (diálogo) e no pós-jogo. Recebe uma
+   * função `nameOf(playerId)` para não depender de nenhum ecrã em concreto.
+   */
+  renderPatternsHTML(occurrences, match, nameOf = () => null) {
+    const chains = this.setPieceChains(occurrences);
+    const speed = this.transitionSpeed(occurrences);
+    const costly = this.costlyLosses(occurrences, match);
+    const zones = this.lossZonesByPlayer(occurrences);
+    const ownName = Utils.escapeHtml(match.team);
+    const oppName = Utils.escapeHtml(match.opponent);
+
+    // Cantos: a % é sobre o total (todo o canto é uma bola parada ofensiva).
+    const cornerRow = (c) => `
+      <div class="pat-row">
+        <span class="pat-row-label">⛳ Cantos</span>
+        <span class="pat-row-val">${c.total}</span>
+        <span class="pat-row-val">${c.withShot}</span>
+        <span class="pat-row-val">${c.goals}</span>
+        <span class="pat-row-pct">${c.total ? c.shotPct + '%' : '—'}</span>
+      </div>`;
+
+    // Livres: a % é só sobre os que estavam em zona de remate — os recomeços
+    // a meio-campo aparecem à parte, para não fingirem ser oportunidades falhadas.
+    const fkRow = (c) => `
+      <div class="pat-row">
+        <span class="pat-row-label" title="Livres em zona de remate (ou que deram remate)">🎯 Livres <span class="pat-row-sub">zona rem.</span></span>
+        <span class="pat-row-val">${c.base}</span>
+        <span class="pat-row-val">${c.baseWithShot}</span>
+        <span class="pat-row-val">${c.baseGoals}</span>
+        <span class="pat-row-pct">${c.base ? c.shotPct + '%' : '—'}</span>
+      </div>
+      ${c.total ? `<p class="pat-block-note">${c.total} ${c.total === 1 ? 'livre' : 'livres'} no total${c.outOfZone ? ` · ${c.outOfZone} fora da zona de remate` : ''}${c.noLocation ? ` · ${c.noLocation} sem localização` : ''}</p>` : ''}`;
+
+    const chainBlock = (title, side) => `
+      <div class="pat-block">
+        <h4>${title}</h4>
+        <div class="pat-row pat-row-head">
+          <span class="pat-row-label"></span>
+          <span class="pat-row-val" title="Jogadas contadas na eficácia">Tot.</span>
+          <span class="pat-row-val" title="Com remate ligado">Rem.</span>
+          <span class="pat-row-val" title="Golos">Gol.</span>
+          <span class="pat-row-pct" title="% que resultou em remate">Efic.</span>
+        </div>
+        ${cornerRow(side.corners)}
+        ${fkRow(side.freeKicks)}
+      </div>`;
+
+    const hasChains = chains.own.corners.total || chains.own.freeKicks.total
+      || chains.opponent.corners.total || chains.opponent.freeKicks.total;
+
+    return `
+      <div class="patterns">
+        <p class="muted pat-intro">Tudo aqui é lido dos registos que já fizeste — não há nada de novo a registar.</p>
+
+        ${hasChains ? `
+        <h3 class="section-title">🔗 Bolas paradas</h3>
+        <div class="pat-grid">
+          ${chainBlock(ownName, chains.own)}
+          ${chainBlock(oppName, chains.opponent)}
+        </div>
+        <p class="muted pat-note">Um canto/livre só conta como “com remate” se tiver mesmo um remate ligado (o botão 🎯 no detalhe). Nos livres, a eficácia é só sobre os que estavam em zona de remate — um recomeço a meio-campo não é uma oportunidade falhada.</p>
+        ` : `<p class="muted">Sem cantos ou livres ligados a remates ainda. Usa o botão 🎯 no detalhe do canto/falta para os ligares.</p>`}
+
+        <h3 class="section-title">⚡ Transição ofensiva</h3>
+        ${speed.recoveries ? `
+          <div class="pat-cards">
+            <div class="pat-card"><strong>${speed.converted}/${speed.recoveries}</strong><span>recuperações com remate em ${this.CHAIN_WINDOW.transition}s</span></div>
+            <div class="pat-card"><strong>${speed.pct}%</strong><span>taxa de conversão</span></div>
+            <div class="pat-card"><strong>${speed.medianSeconds != null ? speed.medianSeconds + 's' : '—'}</strong><span>tempo mediano até rematar</span></div>
+            <div class="pat-card ${speed.goals ? 'is-good' : ''}"><strong>${speed.goals}</strong><span>golos nascidos de recuperação</span></div>
+          </div>
+        ` : '<p class="muted">Ainda não há recuperações registadas.</p>'}
+
+        <h3 class="section-title">🩸 Perdas que custaram caro</h3>
+        ${costly.total ? `
+          <div class="pat-list">
+            ${costly.items.map((it) => {
+              const who = it.playerId ? nameOf(it.playerId) : null;
+              return `<div class="pat-list-row">
+                <span class="history-time">${String(it.loss.minute).padStart(2, '0')}'</span>
+                <span>Perda${who ? ` de <strong>${Utils.escapeHtml(who)}</strong>` : ''} → golo sofrido <strong>${it.seconds}s</strong> depois</span>
+              </div>`;
+            }).join('')}
+          </div>
+        ` : `<p class="muted">Nenhuma perda seguida de golo sofrido em ${this.CHAIN_WINDOW.costlyLoss}s. Boa notícia.</p>`}
+
+        <h3 class="section-title">📍 Onde se perde a bola</h3>
+        ${zones.length ? `
+          <div class="pat-row pat-row-head">
+            <span class="pat-row-label">Jogador</span>
+            <span class="pat-row-val" title="Terço defensivo">Def</span>
+            <span class="pat-row-val" title="Meio-campo">Meio</span>
+            <span class="pat-row-val" title="Terço ofensivo">Of.</span>
+            <span class="pat-row-pct">Total</span>
+          </div>
+          ${zones.map((z) => `
+            <div class="pat-row">
+              <span class="pat-row-label">${Utils.escapeHtml(nameOf(z.playerId) || '—')}</span>
+              <span class="pat-row-val">${z.def}</span>
+              <span class="pat-row-val">${z.mid}</span>
+              <span class="pat-row-val">${z.att}</span>
+              <span class="pat-row-pct">${z.total}</span>
+            </div>`).join('')}
+          <p class="muted pat-note">Só entram perdas com jogador identificado.</p>
+        ` : '<p class="muted">Ainda não há perdas com jogador identificado.</p>'}
+      </div>`;
+  },
+
   /**
    * Gera o HTML do mapa de remates ou faltas (reutilizado no LIVE e no pós-jogo,
    * para não duplicar a mesma lógica de desenho em dois sítios).

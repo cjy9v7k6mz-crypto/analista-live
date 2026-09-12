@@ -4,7 +4,7 @@
  * plano (stale-while-revalidate) para os ficheiros da aplicação.
  */
 
-const CACHE_VERSION = 'analista-live-v23';
+const CACHE_VERSION = 'analista-live-v24';
 const ASSETS = [
   './',
   './index.html',
