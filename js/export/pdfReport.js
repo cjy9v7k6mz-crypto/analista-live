@@ -505,18 +505,22 @@ const PDFReport = {
     all.forEach((p) => {
       const evs = S.ctx.occurrences.filter((o) => (o.playerIds || []).includes(p.id));
       if (!evs.length) return; // só jogadores com dados reais
-      const shots = evs.filter((e) => e.source === 'remate');
+      // Um remate marcado "Golo" pode ter um segundo jogador tagged como
+      // assistência — esse remate conta só a assistência, não remate/golo dele.
+      const shots = evs.filter((e) => e.source === 'remate' && e.meta?.assistId !== p.id);
+      const assists = evs.filter((e) => (e.source === 'golo' || (e.source === 'remate' && e.meta?.result === 'goal')) && e.meta?.assistId === p.id).length;
       rows.push([
         `${p.number || '-'} ${p.shortName || p.name}`,
         String(evs.length),
         String(shots.length),
         String(shots.filter((e) => e.meta?.result === 'goal').length),
+        String(assists),
         String(evs.filter((e) => e.source === 'falta' && e.meta?.committedById === p.id).length),
         String(evs.filter((e) => e.source === 'cartao').length),
       ]);
     });
     if (!rows.length) return this.empty(S, 'Nenhum evento foi associado a jogadores neste jogo.');
-    this.table(S, ['Jogador', 'Eventos', 'Remates', 'Golos', 'Faltas', 'Cartões'], rows, [0.34, 0.14, 0.14, 0.12, 0.13, 0.13]);
+    this.table(S, ['Jogador', 'Eventos', 'Remates', 'Golos', 'Assist.', 'Faltas', 'Cartões'], rows, [0.28, 0.12, 0.12, 0.11, 0.11, 0.13, 0.13]);
   },
 
   sectionMoments(S) {

@@ -10,8 +10,12 @@
  *   });
  *   // result = { players: [ {id, name, ...} ] } | { players: [] } (Desconhecido) | null (cancelado)
  *
- * Modo rápido: em seleção única, tocar num jogador fecha e resolve imediatamente
+ * Modo rápido: em seleção única, tocar num cartão fecha e resolve imediatamente
  * (sem passo de confirmação extra) — mantém a velocidade do LIVE.
+ *
+ * Visual: cada equipa é uma faixa de CARTÕES grandes, deslizável horizontalmente
+ * (toca ou arrasta) — em vez de obrigar a procurar por nome, os jogadores mais
+ * prováveis (em campo) aparecem logo nos primeiros cartões.
  */
 
 const PlayerPicker = {
@@ -72,7 +76,8 @@ const PlayerPicker = {
     container.innerHTML = groups.map((g) => {
       if (!g.players || g.players.length === 0) return '';
       // Se os jogadores trazem informação de campo/banco (LineupState), mostra
-      // "EM CAMPO" primeiro — são os candidatos mais prováveis durante o jogo.
+      // "EM CAMPO" primeiro — são os candidatos mais prováveis durante o jogo,
+      // por isso ficam logo nos primeiros cartões, sem precisar de deslizar.
       const hasFieldInfo = g.players.some((p) => p._onField !== undefined);
       if (!hasFieldInfo) {
         return this._groupBlock(g.label, g.players);
@@ -82,13 +87,13 @@ const PlayerPicker = {
       return `
         <div class="pp-group">
           <h4 class="pp-group-title">${Utils.escapeHtml(g.label)}</h4>
-          ${onField.length ? `<p class="pp-subheading">EM CAMPO</p>${this._playerGrid(onField)}` : ''}
-          ${bench.length ? `<p class="pp-subheading">BANCO</p>${this._playerGrid(bench)}` : ''}
+          ${onField.length ? `<p class="pp-subheading">EM CAMPO</p>${this._playerSlide(onField)}` : ''}
+          ${bench.length ? `<p class="pp-subheading">BANCO</p>${this._playerSlide(bench)}` : ''}
         </div>
       `;
     }).join('') || '<p class="muted">Sem jogadores disponíveis nesta equipa.</p>';
 
-    container.querySelectorAll('.pp-player-btn').forEach((btn) => {
+    container.querySelectorAll('.pp-card').forEach((btn) => {
       btn.addEventListener('click', () => this._onPick(btn.dataset.id));
     });
   },
@@ -97,19 +102,20 @@ const PlayerPicker = {
     return `
       <div class="pp-group">
         <h4 class="pp-group-title">${Utils.escapeHtml(label)}</h4>
-        ${this._playerGrid(players)}
+        ${this._playerSlide(players)}
       </div>
     `;
   },
 
-  _playerGrid(players) {
+  /** Faixa de cartões grandes, deslizável horizontalmente (toque imediato, sem procurar). */
+  _playerSlide(players) {
     return `
-      <div class="pp-grid">
+      <div class="pp-slide">
         ${players.map((p) => `
-          <button type="button" class="pp-player-btn" data-id="${p.id}">
-            ${playerAvatar(p, 'sm')}
-            <span class="pp-player-num">${p.number ? '#' + p.number : ''}</span>
-            <span class="pp-player-name">${Utils.escapeHtml(p.shortName || p.name)}</span>
+          <button type="button" class="pp-card ${p._status === 'sub_in' ? 'is-sub-in' : ''}" data-id="${p.id}">
+            ${playerAvatar(p, 'lg')}
+            <span class="pp-card-num">${p.number ? '#' + p.number : ''}</span>
+            <span class="pp-card-name">${Utils.escapeHtml(p.shortName || p.name)}</span>
           </button>
         `).join('')}
       </div>
@@ -123,7 +129,7 @@ const PlayerPicker = {
       this._close({ players: [player] });
       return;
     }
-    const btn = this._dlg.querySelector(`.pp-player-btn[data-id="${playerId}"]`);
+    const btn = this._dlg.querySelector(`.pp-card[data-id="${playerId}"]`);
     const idx = this._selected.findIndex((p) => p.id === playerId);
     if (idx >= 0) {
       this._selected.splice(idx, 1);
@@ -136,9 +142,9 @@ const PlayerPicker = {
 
   _filter(term) {
     const t = term.toLowerCase();
-    this._dlg.querySelectorAll('.pp-player-btn').forEach((btn) => {
-      const name = btn.querySelector('.pp-player-name').textContent.toLowerCase();
-      const num = btn.querySelector('.pp-player-num').textContent.toLowerCase();
+    this._dlg.querySelectorAll('.pp-card').forEach((btn) => {
+      const name = btn.querySelector('.pp-card-name').textContent.toLowerCase();
+      const num = btn.querySelector('.pp-card-num').textContent.toLowerCase();
       btn.style.display = (!t || name.includes(t) || num.includes(t)) ? '' : 'none';
     });
   },

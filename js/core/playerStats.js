@@ -68,6 +68,12 @@ const PlayerStats = {
 
       switch (o.source) {
         case 'remate':
+          // Um remate marcado "Golo" pode ter dois jogadores tagged — quem
+          // rematou e quem assistiu. A assistência não conta como remate dela.
+          if (o.meta && o.meta.assistId === playerId) {
+            s.assists++;
+            break;
+          }
           s.shots++;
           if (o.meta && (o.meta.result === 'goal' || o.meta.result === 'save')) s.shotsOnTarget++;
           if (o.meta && o.meta.result === 'goal') s.goals++;

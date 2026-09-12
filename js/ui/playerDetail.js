@@ -20,13 +20,16 @@ const PlayerDetailScreen = {
     const moments = events.filter((e) => e.source === 'momento');
     const interventions = events.filter((e) => e.source === 'banco');
     const cards = events.filter((e) => e.source === 'cartao');
-    const shots = events.filter((e) => e.source === 'remate');
+    // Um remate marcado "Golo" pode ter um segundo jogador tagged como
+    // assistência — esse remate não conta como remate/golo DELE, só a assistência.
+    const shots = events.filter((e) => e.source === 'remate' && e.meta?.assistId !== player.id);
     const shotsOnTarget = shots.filter((e) => e.meta?.result === 'goal' || e.meta?.result === 'save');
     // Golos = remates marcados "Golo" + golos do placar atribuídos a este jogador
     // (dois fluxos distintos, nunca o mesmo golo — ver PlayerStats).
     const goalCount = shots.filter((e) => e.meta?.result === 'goal').length
       + allOccurrences.filter((o) => o.source === 'golo' && o.meta?.scorerId === player.id).length;
-    const assistCount = allOccurrences.filter((o) => o.source === 'golo' && o.meta?.assistId === player.id).length;
+    const assistCount = allOccurrences.filter((o) => o.source === 'golo' && o.meta?.assistId === player.id).length
+      + allOccurrences.filter((o) => o.source === 'remate' && o.meta?.result === 'goal' && o.meta?.assistId === player.id).length;
     const corners = events.filter((e) => e.source === 'canto');
     const foulsCommitted = events.filter((e) => e.source === 'falta' && e.meta?.committedById === player.id);
     const foulsSuffered = events.filter((e) => e.source === 'falta' && e.meta?.sufferedById === player.id);

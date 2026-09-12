@@ -164,12 +164,17 @@ const StatsPanel = {
     this._dlg.querySelector('#shot-team-opp').addEventListener('click', () => this.registerShotQuick('opponent'));
   },
 
-  async registerShotQuick(side) {
+  /**
+   * @param {object} [extraMeta] - liga este remate a outra ocorrência que o
+   * originou (canto, falta) — `fromCornerId` / `fromFoulId`. É sempre um
+   * remate a mais, nunca substitui a contagem do canto/falta original.
+   */
+  async registerShotQuick(side, extraMeta = {}) {
     const occ = await this.live.recordOccurrence({
       eventName: 'Remate',
       category: side === 'own' ? 'nossa_equipa' : 'adversario',
       team: side, priority: 'important', source: 'remate', type: 'neutral',
-      meta: { origin: null, result: null, goalZone: null },
+      meta: { origin: null, result: null, goalZone: null, ...extraMeta },
     });
     toast('⚽ Remate registado');
     this.refreshLiveViews();
@@ -198,6 +203,11 @@ const StatsPanel = {
           <p class="field-label">Zona da baliza (onde a bola foi)</p>
           ${this.goalGraphicHTML('shot-goal-zone')}
         </div>
+        <div id="shot-assist-wrap" hidden>
+          <p class="field-label">Assistência <span class="muted">(opcional)</span></p>
+          <button class="btn btn-small" id="shot-pick-assist">＋ Escolher jogador</button>
+          <span id="shot-assist-chosen" class="muted"></span>
+        </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-primary" id="shot-done">Concluir</button>
         </div>
@@ -205,14 +215,30 @@ const StatsPanel = {
     `;
 
     let chosenPlayerId = null;
+    let chosenAssistId = null;
+    // Assistência "ativa": perguntada sozinha assim que o remate fica marcado
+    // como golo — não obriga a lembrar de tocar num botão extra.
+    let assistAsked = false;
+    const roster = () => side === 'own'
+      ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
+      : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
+    const askAssistIfGoal = async () => {
+      if (occ.meta.result !== 'goal' || assistAsked) return;
+      assistAsked = true;
+      const players = roster()[0].players.filter((p) => p.id !== chosenPlayerId);
+      const r = await PlayerPicker.open({ title: 'Assistência (opcional)', groups: [{ label: roster()[0].label, players }], multi: false });
+      if (r && r.players.length) {
+        chosenAssistId = r.players[0].id;
+        this._dlg.querySelector('#shot-assist-chosen').textContent = r.players[0].shortName || r.players[0].name;
+      }
+    };
+
     this._dlg.querySelector('#shot-pick-player').addEventListener('click', async () => {
-      const groups = side === 'own'
-        ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
-        : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
-      const result = await PlayerPicker.open({ title: 'Remate — jogador', groups, multi: false });
+      const result = await PlayerPicker.open({ title: 'Remate — jogador', groups: roster(), multi: false });
       if (result && result.players.length) {
         chosenPlayerId = result.players[0].id;
         this._dlg.querySelector('#shot-player-chosen').textContent = result.players[0].shortName || result.players[0].name;
+        await askAssistIfGoal();
       }
     });
 
@@ -220,12 +246,23 @@ const StatsPanel = {
 
     let chosenZone = null;
     this._dlg.querySelectorAll('.result-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', async () => {
         this._dlg.querySelectorAll('.result-btn').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
         occ.meta.result = btn.dataset.result;
         this._dlg.querySelector('#shot-goal-zone-wrap').hidden = !(occ.meta.result === 'goal' || occ.meta.result === 'save');
+        this._dlg.querySelector('#shot-assist-wrap').hidden = occ.meta.result !== 'goal';
+        await askAssistIfGoal();
       });
+    });
+    this._dlg.querySelector('#shot-pick-assist').addEventListener('click', async () => {
+      assistAsked = true;
+      const players = roster()[0].players.filter((p) => p.id !== chosenPlayerId);
+      const r = await PlayerPicker.open({ title: 'Assistência', groups: [{ label: roster()[0].label, players }], multi: false });
+      if (r && r.players.length) {
+        chosenAssistId = r.players[0].id;
+        this._dlg.querySelector('#shot-assist-chosen').textContent = r.players[0].shortName || r.players[0].name;
+      }
     });
     this._dlg.querySelectorAll('.goal-zone-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -236,8 +273,10 @@ const StatsPanel = {
     });
 
     this._dlg.querySelector('#shot-done').addEventListener('click', async () => {
-      if (chosenPlayerId) occ.playerIds = [chosenPlayerId];
+      const ids = [chosenPlayerId, chosenAssistId].filter(Boolean);
+      if (ids.length) occ.playerIds = ids;
       if (chosenZone) occ.meta.goalZone = chosenZone;
+      if (chosenAssistId) occ.meta.assistId = chosenAssistId;
       if (occ.meta.result === 'goal') {
         // Fonte única do placar — um remate marcado "Golo" incrementa o resultado
         // diretamente; nunca cria um segundo registo de golo (ver matchStats.js).
@@ -303,6 +342,9 @@ const StatsPanel = {
         <div class="result-grid">
           ${MatchStats.CORNER_RESULTS.map((r) => `<button type="button" class="btn result-btn" data-result="${r.key}">${r.label}</button>`).join('')}
         </div>
+        <div id="corner-chain-wrap" hidden>
+          <button type="button" class="btn btn-small btn-primary" id="corner-chain-shot">🎯 Este canto teve remate — registar</button>
+        </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-primary" id="corner-done">Concluir</button>
         </div>
@@ -331,7 +373,16 @@ const StatsPanel = {
         this._dlg.querySelectorAll('[data-result]').forEach((b) => b.classList.remove('selected'));
         btn.classList.add('selected');
         occ.meta.result = btn.dataset.result;
+        // Um canto que termina em remate ou golo passa a contar TAMBÉM como
+        // remate — sem isto o resultado ficava só numa etiqueta, sem entrar
+        // nas estatísticas de remates/golos.
+        this._dlg.querySelector('#corner-chain-wrap').hidden = !(occ.meta.result === 'shot' || occ.meta.result === 'goal');
       });
+    });
+    this._dlg.querySelector('#corner-chain-shot').addEventListener('click', async () => {
+      if (chosenPlayerId) occ.playerIds = [chosenPlayerId];
+      await AppState.updateOccurrence(occ);
+      this.registerShotQuick(side, { fromCornerId: occ.id });
     });
     this._dlg.querySelector('#corner-done').addEventListener('click', async () => {
       if (chosenPlayerId) occ.playerIds = [chosenPlayerId];
@@ -396,6 +447,9 @@ const StatsPanel = {
         <p class="field-label">Quem sofreu</p>
         <button class="btn btn-small" id="foul-pick-suffered">＋ Escolher jogador</button>
         <span id="foul-suffered-chosen" class="muted"></span>
+        <div id="foul-chain-wrap" hidden>
+          <button type="button" class="btn btn-small btn-primary" id="foul-chain-shot">🎯 A falta resultou em remate — registar</button>
+        </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-primary" id="foul-done">Concluir</button>
         </div>
@@ -438,10 +492,15 @@ const StatsPanel = {
         const k = btn.dataset.conseq;
         if (conseq.has(k)) { conseq.delete(k); btn.classList.remove('selected'); }
         else { conseq.add(k); btn.classList.add('selected'); }
+        // Um livre direto pode terminar em remate — sem isto ficava só a
+        // etiqueta "Livre", sem entrar nas estatísticas de remates/golos.
+        this._dlg.querySelector('#foul-chain-wrap').hidden = !conseq.has('freeKick');
       });
     });
 
-    this._dlg.querySelector('#foul-done').addEventListener('click', async () => {
+    // Partilhado entre "Concluir" e "Registar remate" — grava o que já foi
+    // preenchido sem duplicar a lógica de cartões.
+    const persistFoul = async () => {
       occ.meta.consequences = [...conseq];
       const ids = [];
       if (committedId) { occ.meta.committedById = committedId; ids.push(committedId); }
@@ -459,6 +518,16 @@ const StatsPanel = {
         await AppState.persistMatch();
       }
       await AppState.updateOccurrence(occ);
+    };
+
+    this._dlg.querySelector('#foul-chain-shot').addEventListener('click', async () => {
+      await persistFoul();
+      // O livre é batido pela equipa que sofreu a falta.
+      this.registerShotQuick(otherSide, { fromFoulId: occ.id });
+    });
+
+    this._dlg.querySelector('#foul-done').addEventListener('click', async () => {
+      await persistFoul();
       this.refreshLiveViews();
       toast('Falta atualizada');
       this.renderMain();

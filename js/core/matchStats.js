@@ -103,6 +103,9 @@ const MatchStats = {
         const r = o.meta?.result;
         if (r === 'goal' || r === 'save') t.shotsOnTarget++;
         else if (r === 'wide' || r === 'post') t.shotsOffTarget++;
+        // Um remate marcado "Golo" pode ter assistência própria (não passa
+        // pelo fluxo do placar) — conta-se aqui tal como a do golo por placar.
+        if (r === 'goal' && o.meta?.assistId) t.assists++;
       } else if (o.source === 'canto') {
         t.corners++;
       } else if (o.source === 'falta') {

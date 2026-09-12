@@ -1344,7 +1344,18 @@ const LiveScreen = {
     dlg.querySelector('#goal-pick-scorer').addEventListener('click', async () => {
       const s = isOwnGoal ? (side === 'own' ? 'opponent' : 'own') : side;
       const r = await PlayerPicker.open({ title: isOwnGoal ? 'Autogolo de' : 'Marcador', groups: rosterFor(s), multi: false });
-      if (r && r.players.length) { scorerId = r.players[0].id; dlg.querySelector('#goal-scorer-name').textContent = r.players[0].shortName || r.players[0].name; }
+      if (r && r.players.length) {
+        scorerId = r.players[0].id;
+        dlg.querySelector('#goal-scorer-name').textContent = r.players[0].shortName || r.players[0].name;
+        // Assistência ativa: pergunta-se logo a seguir ao marcador, sem exigir
+        // outro toque à parte — só num autogolo é que não faz sentido.
+        if (!isOwnGoal && !assistId) {
+          const groups = rosterFor(side);
+          groups[0].players = groups[0].players.filter((p) => p.id !== scorerId);
+          const ra = await PlayerPicker.open({ title: 'Assistência (opcional)', groups, multi: false });
+          if (ra && ra.players.length) { assistId = ra.players[0].id; dlg.querySelector('#goal-assist-name').textContent = ra.players[0].shortName || ra.players[0].name; }
+        }
+      }
     });
     dlg.querySelector('#goal-pick-assist').addEventListener('click', async () => {
       // A assistência é sempre da MESMA equipa do marcador.
