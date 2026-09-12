@@ -16,6 +16,9 @@
  * Visual: cada equipa é uma faixa de CARTÕES grandes, deslizável horizontalmente
  * (toca ou arrasta) — em vez de obrigar a procurar por nome, os jogadores mais
  * prováveis (em campo) aparecem logo nos primeiros cartões.
+ *
+ * Sem caixa de pesquisa, de propósito: no iPad o teclado tapava metade do ecrã
+ * e escrever em jogo é mais lento do que deslizar até ao cartão.
  */
 
 const PlayerPicker = {
@@ -33,7 +36,6 @@ const PlayerPicker = {
     dlg.innerHTML = `
       <div class="dialog-card">
         <h3 id="pp-title">Selecionar Jogador</h3>
-        <input type="search" id="pp-search" placeholder="Pesquisar jogador...">
         <div id="pp-groups" class="pp-groups"></div>
         <div class="dialog-actions pp-actions">
           <button type="button" class="btn" id="pp-cancel">Cancelar</button>
@@ -48,7 +50,6 @@ const PlayerPicker = {
     dlg.querySelector('#pp-cancel').addEventListener('click', () => this._close(null));
     dlg.querySelector('#pp-unknown').addEventListener('click', () => this._close({ players: [] }));
     dlg.querySelector('#pp-confirm').addEventListener('click', () => this._close({ players: this._selected }));
-    dlg.querySelector('#pp-search').addEventListener('input', (e) => this._filter(e.target.value));
     dlg.addEventListener('cancel', () => this._close(null)); // tecla Esc / swipe-down no iPad
 
     return dlg;
@@ -61,7 +62,6 @@ const PlayerPicker = {
     this._allPlayers = groups.flatMap((g) => g.players.map((p) => ({ ...p, _group: g.label })));
 
     dlg.querySelector('#pp-title').textContent = title;
-    dlg.querySelector('#pp-search').value = '';
     dlg.querySelector('#pp-confirm').style.display = multi ? 'inline-flex' : 'none';
     this._renderGroups(groups);
 
@@ -138,15 +138,6 @@ const PlayerPicker = {
       this._selected.push(player);
       btn.classList.add('selected');
     }
-  },
-
-  _filter(term) {
-    const t = term.toLowerCase();
-    this._dlg.querySelectorAll('.pp-card').forEach((btn) => {
-      const name = btn.querySelector('.pp-card-name').textContent.toLowerCase();
-      const num = btn.querySelector('.pp-card-num').textContent.toLowerCase();
-      btn.style.display = (!t || name.includes(t) || num.includes(t)) ? '' : 'none';
-    });
   },
 
   _close(result) {
