@@ -1,5 +1,11 @@
 /**
  * halftime.js — Resumo de intervalo, baseado exclusivamente nos dados registados.
+ *
+ * O intervalo é o único momento em que ainda dá para mudar o jogo, e com o
+ * relógio parado não há pressa nenhuma — por isso mostra-se aqui TUDO o que já
+ * está calculado (mapas, padrões, fecho do scouting), e não só as listas de
+ * contagens. Nada disto pede um registo novo: é a mesma informação do pós-jogo,
+ * entregue a tempo de servir para alguma coisa.
  */
 
 const HalftimeScreen = {
@@ -7,6 +13,16 @@ const HalftimeScreen = {
     const match = await DB.get(DB.STORES.matches, params.matchId);
     if (!match) { window.location.hash = '#/dashboard'; return; }
     const occurrences = await AppState.getOccurrences(match.id);
+
+    // Jogadores das duas equipas, para resolver nomes nos padrões.
+    const ownPlayers = match.teams?.own?.teamId ? await AppState.getTeamPlayers(match.teams.own.teamId) : [];
+    const opponentPlayers = match.teams?.opponent?.teamId ? await AppState.getTeamPlayers(match.teams.opponent.teamId) : [];
+    const allPlayers = [...ownPlayers, ...opponentPlayers];
+    const nameOf = (id) => {
+      const p = allPlayers.find((x) => x.id === id);
+      return p ? (p.shortName || p.name) : null;
+    };
+    const stats = MatchStats.compute(match, occurrences);
 
     const counts = {}; // planEventId -> count
     occurrences.forEach((o) => { if (o.planEventId) counts[o.planEventId] = (counts[o.planEventId] || 0) + 1; });
@@ -55,6 +71,37 @@ const HalftimeScreen = {
             ${listOrEmpty(moments, (o) => `<div class="ht-row"><span>${String(o.minute).padStart(2, '0')}'</span>${o.note ? `<span class="muted">"${Utils.escapeHtml(o.note)}"</span>` : '<span class="muted">sem nota</span>'}</div>`)}
           </section>
         </div>
+
+        <section class="ht-card ht-stats-card">
+          <h2>📊 Números até aqui</h2>
+          <table class="stats-table">
+            ${MatchStats.STAT_KEYS
+              .filter((k) => stats.own[k.key] || stats.opp[k.key])
+              .map((k) => `
+                <tr class="stats-row">
+                  <td class="stats-cell-val"><span class="stats-num">${stats.own[k.key]}</span></td>
+                  <td class="stats-cell-label">${k.label}</td>
+                  <td class="stats-cell-val"><span class="stats-num">${stats.opp[k.key]}</span></td>
+                </tr>`).join('') || '<tr><td colspan="3" class="muted">Sem números registados ainda.</td></tr>'}
+          </table>
+          <p class="muted center">${Utils.escapeHtml(match.team)} · ${Utils.escapeHtml(match.opponent)} — só se mostram as linhas com registos.</p>
+        </section>
+
+        <section class="ht-card">
+          <h2>🎯 O que o scouting previa</h2>
+          ${MatchStats.renderScoutingCheckHTML(match, occurrences)}
+        </section>
+
+        <div class="halftime-grid pg-maps-grid">
+          <section class="ht-card">${MatchStats.renderTransitionsMapHTML(occurrences, match.team, match.opponent)}</section>
+          <section class="ht-card">${MatchStats.renderMapHTML('shots', occurrences, match.team, match.opponent)}</section>
+          <section class="ht-card">${MatchStats.renderMapHTML('fouls', occurrences, match.team, match.opponent)}</section>
+        </div>
+
+        <section class="ht-card">
+          <h2>🔗 Padrões</h2>
+          ${MatchStats.renderPatternsHTML(occurrences, match, nameOf)}
+        </section>
 
         <div class="halftime-actions">
           <button class="btn" id="btn-back-live">← Voltar ao painel</button>

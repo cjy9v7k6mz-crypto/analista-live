@@ -527,7 +527,10 @@ const CoachDashboard = {
         </div>
       </div>
       ${!hasLineup ? '<p class="muted coach-empty">Onze inicial ainda não foi definido pelo analista.</p>' : ''}
-      <button class="btn btn-tiny coach-tmap-btn" id="coach-open-tmap">🗺 Mapa de Perdas &amp; Recuperações</button>
+      <div class="coach-map-btns">
+        <button class="btn btn-tiny coach-tmap-btn" id="coach-open-tmap">🗺 Mapa de Perdas &amp; Recuperações</button>
+        <button class="btn btn-tiny coach-tmap-btn" id="coach-open-patterns">🔗 Padrões</button>
+      </div>
       <div class="coach-pitch-legend">
         <span><b class="dot own"></b> ${Utils.escapeHtml(this.match.team)} <span class="muted">↑</span></span>
         <span><b class="dot opp"></b> ${Utils.escapeHtml(this.match.opponent)} <span class="muted">↓</span></span>
@@ -537,6 +540,34 @@ const CoachDashboard = {
     wrap.querySelectorAll('[data-coach-player]').forEach((b) =>
       b.addEventListener('click', () => this.showPlayerCard(b.dataset.coachPlayer)));
     document.getElementById('coach-open-tmap')?.addEventListener('click', () => this.openTransitionsMap());
+    document.getElementById('coach-open-patterns')?.addEventListener('click', () => this.openPatterns());
+  },
+
+  /**
+   * Padrões do jogo — o mesmo bloco do analista, lido do que já foi registado.
+   * Traz também o fecho do scouting: no banco, ver ao vivo se o adversário está
+   * mesmo a fazer o que se previu vale tanto como os números.
+   */
+  openPatterns() {
+    const nameOf = (id) => {
+      const p = this.players.find((x) => x.id === id);
+      return p ? (p.shortName || p.name) : null;
+    };
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dialog dialog-wide';
+    dlg.id = 'dlg-coach-patterns';
+    dlg.innerHTML = `
+      <div class="dialog-card">
+        <div class="stats-head"><h3>🔗 Padrões do Jogo</h3><button type="button" class="icon-btn" data-close>✕</button></div>
+        <h3 class="section-title">🎯 O que o scouting previa</h3>
+        ${MatchStats.renderScoutingCheckHTML(this.match, this.occurrences)}
+        ${MatchStats.renderPatternsHTML(this.occurrences, this.match, nameOf)}
+        <div class="dialog-actions"><button type="button" class="btn" data-close>Fechar</button></div>
+      </div>`;
+    document.body.appendChild(dlg);
+    dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => { dlg.close(); dlg.remove(); }));
+    dlg.addEventListener('cancel', () => { dlg.remove(); });
+    dlg.showModal();
   },
 
   /** Mapa de Perdas & Recuperações — o mesmo componente do ecrã do analista. */
@@ -574,6 +605,9 @@ const CoachDashboard = {
     dlg.querySelectorAll('[data-tmf]').forEach((b) => b.addEventListener('click', () => { filter = b.dataset.tmf; paint(); }));
     dlg.querySelectorAll('[data-tmp]').forEach((b) => b.addEventListener('click', () => { period = b.dataset.tmp; paint(); }));
     dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => { dlg.close(); dlg.remove(); }));
+    // Esc fecha mas não removia o elemento — sem isto ficavam <dialog> mortos
+    // a acumular no DOM a cada abertura.
+    dlg.addEventListener('cancel', () => { dlg.remove(); });
     paint();
     dlg.showModal();
   },
@@ -603,6 +637,7 @@ const CoachDashboard = {
     document.body.appendChild(dlg);
     dlg.showModal();
     dlg.querySelector('[data-close]').addEventListener('click', () => { dlg.close(); dlg.remove(); });
+    dlg.addEventListener('cancel', () => { dlg.remove(); });
   },
 
   // ---------- Momentum ----------

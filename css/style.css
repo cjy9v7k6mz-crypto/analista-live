@@ -1399,6 +1399,21 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .pat-list-row { display: flex; gap: 10px; align-items: baseline; font-size: 13px; background: var(--c-red-bg);
   border-left: 3px solid var(--c-red); border-radius: var(--radius-sm); padding: 8px 10px; }
 
+/* ---------- Fecho do ciclo do scouting (intervalo e pós-jogo) ---------- */
+.sck-head { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-dim); margin: 12px 0 6px; }
+.sck-row { display: grid; grid-template-columns: 24px 1fr auto auto; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: var(--radius-sm); border-left: 3px solid transparent; margin-bottom: 4px; font-size: 13px; }
+.sck-row.is-seen { background: var(--c-green-bg); border-left-color: var(--c-green); }
+.sck-row.is-unseen { background: var(--surface-2); border-left-color: var(--border-strong); color: var(--text-dim); }
+.sck-badge { font-size: 14px; }
+.sck-name { overflow: hidden; text-overflow: ellipsis; }
+.sck-count { font-family: var(--font-mono); }
+.sck-row.is-seen .sck-count { color: var(--c-green); }
+.sck-row.is-unseen .sck-count { color: var(--text-mute); }
+
+/* Botões dos mapas no banco, lado a lado */
+.coach-map-btns { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+
 /* Filtro do campo ao vivo no banco: o que aparece (onze/remates/faltas/perdas/recuperações) */
 .coach-pitch-filters { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
 .coach-pitch-filter { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-mute);

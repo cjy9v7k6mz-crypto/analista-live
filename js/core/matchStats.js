@@ -409,6 +409,58 @@ const MatchStats = {
   },
 
   /**
+   * Fecho do ciclo do scouting: o plano de observação guarda `scoutingRef` nos
+   * eventos importados do dossiê do adversário, mas até aqui ninguém lia esse
+   * campo. Isto responde à pergunta que fica no fim: "o que eu previ no
+   * scouting chegou a acontecer?".
+   *
+   * Não julga o scouting — um item que não se viu tanto pode ser um erro de
+   * análise como um problema que a equipa resolveu bem. Só separa o que foi
+   * observado do que não foi.
+   */
+  scoutingCheck(match, occurrences) {
+    const plan = (match.observationPlan || []).filter((e) => e && e.scoutingRef);
+    if (!plan.length) return { total: 0, confirmed: [], unseen: [] };
+    const counts = {};
+    occurrences.forEach((o) => {
+      if (o.planEventId) counts[o.planEventId] = (counts[o.planEventId] || 0) + 1;
+    });
+    const lists = window.SCOUTING_LISTS || [];
+    const rows = plan.map((e) => ({
+      event: e,
+      count: counts[e.id] || 0,
+      list: lists.find((l) => l.id === e.scoutingRef.list) || null,
+    }));
+    return {
+      total: rows.length,
+      confirmed: rows.filter((r) => r.count > 0).sort((a, b) => b.count - a.count),
+      unseen: rows.filter((r) => r.count === 0),
+    };
+  },
+
+  /** Bloco do fecho do ciclo do scouting (intervalo e pós-jogo). */
+  renderScoutingCheckHTML(match, occurrences) {
+    const sc = this.scoutingCheck(match, occurrences);
+    if (!sc.total) {
+      return `<p class="muted">Este plano não tem eventos importados do scouting. No construtor do plano, o botão “🎯 Importar do Scouting” traz os pontos fracos, ameaças e gatilhos do adversário — e depois aparece aqui se aconteceram.</p>`;
+    }
+    const row = (r) => `
+      <div class="sck-row ${r.count ? 'is-seen' : 'is-unseen'}">
+        <span class="sck-badge">${r.list ? r.list.icon : '🎯'}</span>
+        <span class="sck-name">${Utils.escapeHtml(r.event.name)}</span>
+        ${r.event.isFocus ? '<span class="sc-badge">⭐</span>' : ''}
+        <strong class="sck-count">${r.count ? r.count + '×' : '—'}</strong>
+      </div>`;
+    return `
+      <div class="scouting-check">
+        <p class="muted pat-intro">${sc.confirmed.length} de ${sc.total} ${sc.total === 1 ? 'previsão' : 'previsões'} do scouting ${sc.confirmed.length === 1 ? 'confirmou-se' : 'confirmaram-se'} em campo.</p>
+        ${sc.confirmed.length ? `<h4 class="sck-head">✅ Confirmado</h4>${sc.confirmed.map(row).join('')}` : ''}
+        ${sc.unseen.length ? `<h4 class="sck-head">👁 Não se viu</h4>${sc.unseen.map(row).join('')}
+          <p class="muted pat-note">Não ter acontecido pode significar que a leitura estava errada — ou que a equipa o anulou bem. O registo não distingue as duas coisas.</p>` : ''}
+      </div>`;
+  },
+
+  /**
    * Bloco único de "padrões" — usado no LIVE (diálogo) e no pós-jogo. Recebe uma
    * função `nameOf(playerId)` para não depender de nenhum ecrã em concreto.
    */

@@ -61,6 +61,11 @@ const PostgameScreen = {
         </div>
 
         <section class="once-panel">
+          <h2>🎯 O que o scouting previa</h2>
+          ${MatchStats.renderScoutingCheckHTML(match, occurrences)}
+        </section>
+
+        <section class="once-panel">
           <h2>🔗 Padrões do Jogo</h2>
           ${MatchStats.renderPatternsHTML(occurrences, match, (id) => {
             const p = allPlayers.find((x) => x.id === id);
@@ -203,7 +208,12 @@ const PostgameScreen = {
     const savedTemplate = AppState.settings?.reportTemplate || null;
 
     document.getElementById('rep-sections').innerHTML = PDFReport.SECTIONS.map((s) => {
-      const checked = savedTemplate ? (savedTemplate.sections?.[s.key] ? 'checked' : '') : 'checked';
+      // Só um `false` explícito desliga uma secção. Uma chave ausente significa
+      // que a secção é NOVA (foi acrescentada depois de o modelo ter sido
+      // guardado) — nesse caso vem ligada, senão passaria a existir sem que
+      // ninguém a visse no relatório.
+      const saved = savedTemplate && savedTemplate.sections;
+      const checked = (!saved || saved[s.key] === undefined || saved[s.key]) ? 'checked' : '';
       return `<label class="report-section-item"><input type="checkbox" data-section="${s.key}" ${checked}><span>${s.label}</span></label>`;
     }).join('');
     if (savedTemplate) {

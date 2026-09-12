@@ -40,6 +40,8 @@ const PDFReport = {
     { key: 'cards', label: 'Cartões' },
     { key: 'events', label: 'Eventos Registados' },
     { key: 'individual', label: 'Estatísticas Individuais' },
+    { key: 'patterns', label: 'Padrões (bolas paradas, transições, perdas)' },
+    { key: 'scoutingCheck', label: 'O que o Scouting Previa' },
     { key: 'moments', label: 'Momentos Importantes' },
     { key: 'interventions', label: 'Intervenções ao Banco' },
     { key: 'notes', label: 'Notas do Analista' },
@@ -91,6 +93,8 @@ const PDFReport = {
     if (has('cards')) this.sectionCards(S);
     if (has('events')) this.sectionEvents(S);
     if (has('individual')) this.sectionIndividual(S);
+    if (has('patterns')) this.sectionPatterns(S);
+    if (has('scoutingCheck')) this.sectionScoutingCheck(S);
     if (has('moments')) this.sectionMoments(S);
     if (has('interventions')) this.sectionInterventions(S);
     if (has('notes')) this.sectionNotes(S);
@@ -521,6 +525,110 @@ const PDFReport = {
     });
     if (!rows.length) return this.empty(S, 'Nenhum evento foi associado a jogadores neste jogo.');
     this.table(S, ['Jogador', 'Eventos', 'Remates', 'Golos', 'Assist.', 'Faltas', 'Cartões'], rows, [0.28, 0.12, 0.12, 0.11, 0.11, 0.13, 0.13]);
+  },
+
+  /**
+   * Padrões — a mesma leitura derivada dos ecrãs, em texto. Nada aqui pede um
+   * registo novo: é tudo calculado a partir das ocorrências.
+   */
+  sectionPatterns(S) {
+    this.h1(S, '12b. Padrões');
+    const occ = S.ctx.occurrences;
+    const match = S.ctx.match;
+    const chains = MatchStats.setPieceChains(occ);
+    const speed = MatchStats.transitionSpeed(occ);
+    const costly = MatchStats.costlyLosses(occ, match);
+    const zones = MatchStats.lossZonesByPlayer(occ);
+    const nameOf = (id) => {
+      const p = [...S.ctx.ownPlayers, ...S.ctx.opponentPlayers].find((x) => x.id === id);
+      return p ? (p.shortName || p.name) : '-';
+    };
+
+    // --- Bolas paradas ---
+    // Nos livres a base é só os que estavam em zona de remate (ver matchStats):
+    // meter recomeços de meio-campo no denominador daria uma eficácia falsa.
+    const spRows = [];
+    [['own', match.team], ['opponent', match.opponent]].forEach(([side, name]) => {
+      const c = chains[side].corners;
+      const f = chains[side].freeKicks;
+      if (c.total) spRows.push([name, 'Cantos', String(c.total), String(c.withShot), String(c.goals), c.shotPct + '%']);
+      if (f.total) {
+        spRows.push([name, 'Livres (zona rem.)', String(f.base), String(f.baseWithShot), String(f.baseGoals), f.base ? f.shotPct + '%' : '-']);
+      }
+    });
+    if (spRows.length) {
+      this.table(S, ['Equipa', 'Tipo', 'Total', 'C/ remate', 'Golos', 'Eficácia'], spRows, [0.24, 0.22, 0.13, 0.15, 0.12, 0.14]);
+      const fkTotals = ['own', 'opponent'].map((s) => chains[s].freeKicks).filter((f) => f.total);
+      if (fkTotals.some((f) => f.outOfZone || f.noLocation)) {
+        this.text(S, 'Nos livres, a eficácia conta apenas os que estavam em zona de remate (ou que deram remate). '
+          + fkTotals.map((f) => `${f.total} livres no total, ${f.outOfZone} fora da zona`).join(' · ') + '.',
+        { color: this.COLORS.muted, size: 8 });
+        S.y -= 4;
+      }
+    } else {
+      this.text(S, 'Sem cantos ou livres ligados a remates.', { color: this.COLORS.muted, size: 9 });
+      S.y -= 4;
+    }
+
+    // --- Transição ofensiva ---
+    S.y -= 6;
+    if (speed.recoveries) {
+      this.text(S, `Transição ofensiva: ${speed.converted} de ${speed.recoveries} recuperações deram remate em até ${MatchStats.CHAIN_WINDOW.transition}s (${speed.pct}%)`
+        + `${speed.medianSeconds != null ? `, tempo mediano ${speed.medianSeconds}s` : ''}`
+        + `${speed.goals ? `, ${speed.goals} ${speed.goals === 1 ? 'golo nascido' : 'golos nascidos'} daí` : ''}.`, { size: 9 });
+      S.y -= 4;
+    } else {
+      this.text(S, 'Transição ofensiva: sem recuperações registadas.', { color: this.COLORS.muted, size: 9 });
+      S.y -= 4;
+    }
+
+    // --- Perdas que custaram caro ---
+    S.y -= 6;
+    if (costly.total) {
+      const rows = costly.items.map((it) => [
+        `${it.loss.minute}'`,
+        it.playerId ? nameOf(it.playerId) : '-',
+        `${it.seconds}s até ao golo sofrido`,
+      ]);
+      this.table(S, ['Min', 'Jogador', 'Consequência'], rows, [0.12, 0.34, 0.54]);
+    } else {
+      this.text(S, `Perdas que custaram caro: nenhuma perda seguida de golo sofrido em até ${MatchStats.CHAIN_WINDOW.costlyLoss}s.`,
+        { color: this.COLORS.muted, size: 9 });
+      S.y -= 4;
+    }
+
+    // --- Onde se perde a bola ---
+    S.y -= 6;
+    if (zones.length) {
+      const rows = zones.map((z) => [nameOf(z.playerId), String(z.def), String(z.mid), String(z.att), String(z.total)]);
+      this.table(S, ['Jogador', 'Def', 'Meio', 'Ofens.', 'Total'], rows, [0.40, 0.15, 0.15, 0.15, 0.15]);
+      this.text(S, 'Só entram perdas com jogador identificado.', { color: this.COLORS.muted, size: 8 });
+      S.y -= 4;
+    }
+  },
+
+  /** Fecho do ciclo: o que foi importado do scouting chegou a acontecer? */
+  sectionScoutingCheck(S) {
+    this.h1(S, '12c. O que o Scouting Previa');
+    const sc = MatchStats.scoutingCheck(S.ctx.match, S.ctx.occurrences);
+    if (!sc.total) {
+      return this.empty(S, 'Este plano de observação não tem eventos importados do scouting.');
+    }
+    this.text(S, `${sc.confirmed.length} de ${sc.total} ${sc.total === 1 ? 'previsão' : 'previsões'} do scouting `
+      + `${sc.confirmed.length === 1 ? 'confirmou-se' : 'confirmaram-se'} em campo.`, { size: 9 });
+    S.y -= 8;
+    const rows = [...sc.confirmed, ...sc.unseen].map((r) => [
+      r.list ? r.list.title : 'Scouting',
+      r.event.name,
+      r.event.isFocus ? 'Foco' : '-',
+      r.count ? `${r.count}x` : 'não se viu',
+    ]);
+    this.table(S, ['Origem', 'Item', 'Foco', 'Em jogo'], rows, [0.24, 0.44, 0.12, 0.20]);
+    // Travessão (—) não existe em WinAnsi e o sanitize removia-o, deixando dois
+    // espaços; nos textos do PDF usa-se hífen.
+    this.text(S, 'Não ter acontecido pode significar que a leitura estava errada ou que a equipa o anulou bem - o registo não distingue as duas coisas.',
+      { color: this.COLORS.muted, size: 8 });
+    S.y -= 4;
   },
 
   sectionMoments(S) {
