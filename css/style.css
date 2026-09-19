@@ -1534,3 +1534,16 @@ html[data-theme="light"] { --chart-series: #2a78d6; }
 /* ---------- Mudanças táticas (pós-jogo) ---------- */
 .pg-tactics { display: flex; flex-direction: column; gap: 6px; }
 .pg-tactic-row { display: flex; gap: 10px; align-items: baseline; background: var(--surface-2); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px; }
+
+/* ---------- Sincronizar com o vídeo ---------- */
+.vs-anchors { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.vs-anchor-row { display: grid; grid-template-columns: 52px minmax(0, 2fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+.vs-period { font-family: var(--font-mono); font-weight: 700; color: var(--text-dim); }
+.vs-anchor-row select, .vs-anchor-row input { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 14px; min-width: 0; }
+.vs-roll { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
+.vs-roll .field { min-width: 130px; }
+.vs-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.vs-missing { margin: 8px 0 0; font-size: 12px; color: var(--c-yellow); }
+.vs-note { margin: 8px 0 0; font-size: 11px; }
+@media (max-width: 640px) { .vs-anchor-row { grid-template-columns: 1fr; } }

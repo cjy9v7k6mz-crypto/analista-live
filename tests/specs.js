@@ -629,3 +629,51 @@ describe('Leitura de vários jogos — época, recorrências e resumo em texto',
     ok(!txt.includes('Padrões:'), 'sem padrões quando não há dados');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('VideoSync — levar os focos para o tempo do vídeo', () => {
+  const plan = [{ id: 'pe1', name: 'Cantos ao 2º poste', isFocus: true }, { id: 'pe2', name: 'Saída curta', isFocus: false }];
+  const m = () => match({ team: 'Nós', opponent: 'Rivais', date: '2026-01-01', observationPlan: plan });
+  // Dois registos do mesmo foco: 5 minutos reais separam-nos.
+  const t0 = 1700000000000;
+  const list = [
+    occ({ id: 'o1', planEventId: 'pe1', eventName: 'Cantos ao 2º poste', period: '1T', minute: 12, second: 30, timestamp: t0, playerIds: ['A'] }),
+    occ({ id: 'o2', planEventId: 'pe1', eventName: 'Cantos ao 2º poste', period: '1T', minute: 20, second: 0, timestamp: t0 + 300000, note: 'ao primeiro poste' }),
+    occ({ id: 'o3', planEventId: 'pe2', eventName: 'Saída curta', period: '1T', minute: 25, second: 0, timestamp: t0 + 600000 }),
+    occ({ id: 'o4', planEventId: 'pe1', eventName: 'Cantos ao 2º poste', period: '2T', minute: 60, second: 0, timestamp: t0 + 3600000 }),
+  ];
+  it('lê e escreve tempos', () => {
+    eq([VideoSync.parseTime('23:15'), VideoSync.parseTime('1:02:03'), VideoSync.parseTime('90'), VideoSync.parseTime('abc'), VideoSync.parseTime('')], [1395, 3723, 90, null, null]);
+    eq([VideoSync.formatTime(0), VideoSync.formatTime(95), VideoSync.formatTime(3723)], ['0:00', '1:35', '1:02:03']);
+  });
+  it('só leva os focos do plano', () => {
+    eq(VideoSync.focusOccurrences(m(), list).map((o) => o.id), ['o1', 'o2', 'o4']);
+  });
+  it('usa o tempo real entre registos, não o relógio do jogo', () => {
+    // Âncora: o registo o1 aparece aos 10:00 do vídeo. o2 foi 5 minutos reais depois.
+    const r = VideoSync.buildClips({ match: m(), occurrences: list, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 600 } }, preRoll: 8, postRoll: 5, nameOf: () => 'J9' });
+    eq(r.clips.map((c) => [c.id, Math.round(c.videoSeconds)]), [['o1', 600], ['o2', 900]]);
+    eq([r.clips[0].start, r.clips[0].end], [592, 605]);
+    eq(r.missing.map((x) => x.id), ['o4'], 'a 2ª parte não tem âncora');
+  });
+  it('cada parte tem a sua âncora (vídeo cortado ao intervalo)', () => {
+    const r = VideoSync.buildClips({ match: m(), occurrences: list, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 600 }, '2T': { occurrenceId: 'o4', videoSeconds: 120 } } });
+    eq(r.clips.map((c) => [c.id, Math.round(c.videoSeconds)]), [['o4', 120], ['o1', 600], ['o2', 900]]);
+    eq(r.missing.length, 0);
+  });
+  it('nunca gera tempos negativos', () => {
+    const r = VideoSync.buildClips({ match: m(), occurrences: list, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 3 } }, preRoll: 10 });
+    eq(r.clips[0].start, 0);
+  });
+  it('CSV e XML saem com o conteúdo certo e com escape', () => {
+    const r = VideoSync.buildClips({ match: m(), occurrences: list, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 600 } }, nameOf: () => 'J9 & cia' });
+    const csv = VideoSync.toCSV(r.clips);
+    ok(csv.split('\n')[0].startsWith('Tempo video;'), csv);
+    ok(csv.includes('10:00'), csv);
+    const xml = VideoSync.toXML(r.clips, m());
+    ok(xml.includes('<code>Cantos ao 2º poste</code>'), xml);
+    ok(xml.includes('J9 &amp; cia'), 'escape do &');
+    ok(xml.includes('<start>592.0</start>'), xml);
+    ok(VideoSync.toText(r.clips, m()).includes("10:00  Cantos ao 2º poste"), 'texto');
+  });
+});

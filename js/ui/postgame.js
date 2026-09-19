@@ -23,6 +23,9 @@ const PostgameScreen = {
     const positives = eventsWithCounts.filter((e) => e.type === 'positive').sort((a, b) => b.count - a.count).slice(0, 8);
     const bench = occurrences.filter((o) => o.source === 'banco');
     const tactics = occurrences.filter((o) => o.source === 'tatica').sort((a, b) => a.timestamp - b.timestamp);
+    // Vídeo: só os focos do plano, agrupados por parte (cada parte leva a sua âncora).
+    const focusOccs = VideoSync.focusOccurrences(match, occurrences);
+    const focusPeriods = [...new Set(focusOccs.map((o) => o.period))];
     const moments = occurrences.filter((o) => o.source === 'momento');
     const notes = occurrences.filter((o) => o.source === 'nota');
     const momentsForReview = ExportManager.buildMomentsList(occurrences);
@@ -114,6 +117,29 @@ const PostgameScreen = {
             ${listOrEmpty2(notes, (o) => `<div class="ht-row"><span>${o.period} ${String(o.minute).padStart(2, '0')}'</span><span class="muted">"${Utils.escapeHtml(o.note)}"</span></div>`)}
           </section>
         </div>
+
+        <section class="once-panel vs-panel">
+          <h2>🎬 Sincronizar com o vídeo <span class="muted">(focos do plano)</span></h2>
+          ${focusOccs.length ? `
+          <p class="muted">Escolhe um registo de referência em cada parte e escreve o tempo a que ele aparece no vídeo. Os restantes são calculados pelo tempo real decorrido entre registos — aguenta pausas, descontos e correções de minuto.</p>
+          <div class="vs-anchors">
+            ${focusPeriods.map((p) => `
+              <div class="vs-anchor-row">
+                <span class="vs-period">${p}</span>
+                <select data-vs-anchor="${p}">
+                  ${focusOccs.filter((o) => o.period === p).map((o) => `<option value="${o.id}">${VideoSync.gameLabel(o)} · ${Utils.escapeHtml(o.eventName)}</option>`).join('')}
+                </select>
+                <input data-vs-time="${p}" placeholder="tempo no vídeo (mm:ss)" autocapitalize="off" autocorrect="off" spellcheck="false">
+              </div>`).join('')}
+          </div>
+          <div class="vs-roll">
+            <label class="field"><span>Começar antes (s)</span><input id="vs-pre" type="number" min="0" max="120" value="${VideoSync.DEFAULT_PRE_ROLL}"></label>
+            <label class="field"><span>Acabar depois (s)</span><input id="vs-post" type="number" min="0" max="120" value="${VideoSync.DEFAULT_POST_ROLL}"></label>
+            <button class="btn btn-primary" id="vs-calc">Calcular tempos</button>
+          </div>
+          <div id="vs-result"></div>
+          ` : '<p class="muted">Este jogo não tem focos marcados no plano de observação — não há nada para levar ao vídeo.</p>'}
+        </section>
 
         <section class="once-panel">
           <h2>Momentos para Rever <span class="muted">(referência para o Once Sport Analyser Pro)</span></h2>
@@ -210,6 +236,92 @@ const PostgameScreen = {
     document.getElementById('btn-open-sketch').addEventListener('click', () => {
       SketchPad.open(match.id, { onClose: renderSketchPreview });
     });
+    // ---------- Sincronizar com o vídeo ----------
+    if (focusOccs.length) {
+      const nameOf = (id) => {
+        const p = allPlayers.find((x) => x.id === id);
+        return p ? (p.shortName || p.name) : null;
+      };
+      const saved = match.videoSync || {};
+      document.querySelectorAll('[data-vs-anchor]').forEach((sel) => {
+        const a = (saved.anchors || {})[sel.dataset.vsAnchor];
+        if (a && [...sel.options].some((o) => o.value === a.occurrenceId)) sel.value = a.occurrenceId;
+      });
+      document.querySelectorAll('[data-vs-time]').forEach((inp) => {
+        const a = (saved.anchors || {})[inp.dataset.vsTime];
+        if (a) inp.value = VideoSync.formatTime(a.videoSeconds);
+      });
+      if (saved.preRoll != null) document.getElementById('vs-pre').value = saved.preRoll;
+      if (saved.postRoll != null) document.getElementById('vs-post').value = saved.postRoll;
+
+      const renderClips = async () => {
+        const anchors = {};
+        let bad = null;
+        document.querySelectorAll('[data-vs-time]').forEach((inp) => {
+          const raw = inp.value.trim();
+          if (!raw) return;
+          const secs = VideoSync.parseTime(raw);
+          if (secs == null) { bad = raw; return; }
+          anchors[inp.dataset.vsTime] = {
+            occurrenceId: document.querySelector(`[data-vs-anchor="${inp.dataset.vsTime}"]`).value,
+            videoSeconds: secs,
+          };
+        });
+        if (bad !== null) { alert(`Não percebi o tempo "${bad}". Usa mm:ss (ex: 23:15) ou h:mm:ss.`); return; }
+        if (!Object.keys(anchors).length) { alert('Escreve o tempo do vídeo de pelo menos uma parte.'); return; }
+
+        const preRoll = Math.max(0, Number(document.getElementById('vs-pre').value) || 0);
+        const postRoll = Math.max(0, Number(document.getElementById('vs-post').value) || 0);
+        const { clips, missing } = VideoSync.buildClips({ match, occurrences, anchors, preRoll, postRoll, nameOf });
+
+        // Guarda as âncoras no jogo: da próxima vez já vêm preenchidas.
+        match.videoSync = { anchors, preRoll, postRoll };
+        match.updatedAt = Date.now();
+        await DB.put(DB.STORES.matches, match);
+
+        document.getElementById('vs-result').innerHTML = `
+          <div class="ss-table-wrap">
+            <table class="ss-table ss-table-plain">
+              <thead><tr><th>Vídeo</th><th>Clip</th><th>Foco</th><th>Jogadores</th><th>Jogo</th></tr></thead>
+              <tbody>
+                ${clips.map((c) => `
+                  <tr>
+                    <td><strong>${VideoSync.formatTime(c.videoSeconds)}</strong></td>
+                    <td class="muted">${VideoSync.formatTime(c.start)}–${VideoSync.formatTime(c.end)}</td>
+                    <td>${Utils.escapeHtml(c.name)}${c.note ? ` <span class="muted">"${Utils.escapeHtml(c.note)}"</span>` : ''}</td>
+                    <td>${Utils.escapeHtml(c.players.join(' + '))}</td>
+                    <td class="muted">${c.gameLabel}</td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          ${missing.length ? `<p class="muted vs-missing">${missing.length} ${missing.length === 1 ? 'registo ficou' : 'registos ficaram'} de fora: ${[...new Set(missing.map((x) => x.period))].join(', ')} sem tempo de referência.</p>` : ''}
+          <div class="vs-actions">
+            <button class="btn" id="vs-copy">📋 Copiar lista</button>
+            <button class="btn" id="vs-csv">⬇ CSV</button>
+            <button class="btn" id="vs-xml">⬇ XML (Sportscode)</button>
+          </div>
+          <p class="muted vs-note">O XML serve para o Once Sport Analyser (aceita XML/CSV de Sportscode); o Telestrator não importa marcações — aí usa a lista.</p>`;
+
+        document.getElementById('vs-copy').addEventListener('click', async () => {
+          const r = await ExportManager.shareText(VideoSync.toText(clips, match), 'Focos no vídeo');
+          toast({ shared: 'Lista partilhada', copied: 'Lista copiada', cancelled: 'Partilha cancelada', failed: 'Não foi possível partilhar' }[r]);
+        });
+        const base = `focos-video_${(match.opponent || 'jogo').replace(/\s+/g, '-')}_${match.date}`;
+        document.getElementById('vs-csv').addEventListener('click', () => {
+          downloadFile(`${base}.csv`, '﻿' + VideoSync.toCSV(clips), 'text/csv;charset=utf-8');
+          toast('CSV exportado');
+        });
+        document.getElementById('vs-xml').addEventListener('click', () => {
+          downloadFile(`${base}.xml`, VideoSync.toXML(clips, match), 'application/xml');
+          toast('XML exportado');
+        });
+      };
+
+      document.getElementById('vs-calc').addEventListener('click', renderClips);
+      if (saved.anchors && Object.keys(saved.anchors).length) renderClips();
+    }
+
     document.getElementById('btn-copy-summary').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;

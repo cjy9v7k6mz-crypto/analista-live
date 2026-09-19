@@ -4,7 +4,7 @@
  * plano (stale-while-revalidate) para os ficheiros da aplicação.
  */
 
-const CACHE_VERSION = 'analista-live-v32';
+const CACHE_VERSION = 'analista-live-v33';
 const ASSETS = [
   './',
   './index.html',
@@ -28,6 +28,7 @@ const ASSETS = [
   './js/core/dataSafety.js',
   './js/core/seasonTrends.js',
   './js/core/playerReport.js',
+  './js/core/videoSync.js',
   './js/sync/syncCore.js',
   './js/sync/transportLocal.js',
   './js/sync/transportSupabase.js',
