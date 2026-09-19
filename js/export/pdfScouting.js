@@ -267,10 +267,22 @@ const PDFScouting = {
     if (!items.length) return R.empty(S);
     // Imagens associadas a itens entram logo a seguir à tabela.
     const withImages = items.filter((it) => it.image);
-    R.table(S, ['Título', 'Descrição', 'Prioridade'], items.map((it) => [
+    // "Confirmado": jogos em que aconteceu / jogos terminados em que estava no plano.
+    const tr = S.ctx.trackRecord;
+    const hist = (it) => {
+      const rec = tr && tr.get(it.id);
+      return rec && rec.tracked ? `${rec.confirmed}/${rec.tracked} ${rec.tracked === 1 ? 'jogo' : 'jogos'}` : '-';
+    };
+    R.table(S, ['Título', 'Descrição', 'Prioridade', 'Confirmado'], items.map((it) => [
       it.title, it.description || '',
       R.sanitize((SCOUTING_PRIORITIES.find((p) => p.key === it.priority) || {}).label || '-').trim() || '-',
-    ]), [0.3, 0.5, 0.2]);
+      hist(it),
+    ]), [0.26, 0.44, 0.15, 0.15]);
+    if (tr && items.some((it) => tr.get(it.id)?.tracked)) {
+      // Texto pequeno em cinzento que passa os 4,5:1 sobre branco (o "muted" do motor fica em 4,29:1).
+      R.text(S, 'Confirmado: jogos em que aconteceu / jogos terminados em que estava no plano de observação.', { size: 8, color: [0x5f / 255, 0x65 / 255, 0x73 / 255] });
+      S.y -= 4;
+    }
     for (const it of withImages) {
       await this.renderBlocks(S, R, [{ type: 'image', image: it.image, caption: it.caption || it.title }]);
     }

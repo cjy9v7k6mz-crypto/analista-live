@@ -111,12 +111,25 @@ const ExportManager = {
     return fname;
   },
 
-  /** Backup completo (toda a base de dados) em JSON. */
+  /**
+   * Backup completo (toda a base de dados) em JSON.
+   * @returns {Promise<{ok: boolean, fname: string}>} ok=false se a partilha foi cancelada.
+   */
   async exportFullBackup() {
+    const now = Date.now();
     const data = await DB.exportAll();
-    const fname = `analista-live_backup_${new Date().toISOString().slice(0, 10)}.json`;
-    downloadFile(fname, JSON.stringify(data, null, 2), 'application/json');
-    return fname;
+    // O ficheiro leva a própria data de backup: restaurá-lo mais tarde mostra
+    // o "último backup" certo em vez de uma data antiga.
+    if (Array.isArray(data.settings)) {
+      data.settings = data.settings.map((s) => (s && s.key === 'app' ? { ...s, lastBackupAt: now, backupSnoozeUntil: null } : s));
+    }
+    const fname = `analista-live_backup_${new Date(now).toISOString().slice(0, 10)}.json`;
+    // No iPad abre a folha de partilha; se for cancelada não há backup nenhum e
+    // não se regista como feito. (No computador cai num link de transferência,
+    // que não diz se o ficheiro chegou a ser guardado.)
+    const ok = await downloadFile(fname, JSON.stringify(data, null, 2), 'application/json');
+    if (ok) await AppState.saveSettings({ lastBackupAt: now, backupSnoozeUntil: null });
+    return { ok, fname };
   },
 
   /** Backup de um único jogo (mais leve, para partilhar). */
@@ -138,11 +151,121 @@ const ExportManager = {
     return fname;
   },
 
-  async importFullBackup(file) {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    await DB.importAll(data);
+  /** Lê e valida o ficheiro de UM jogo (o que sai do pós-jogo). */
+  async readMatchFile(file) {
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (e) {
+      throw new Error('Este ficheiro não é um JSON válido.');
+    }
+    if (data && Array.isArray(data.matches)) {
+      throw new Error('Este ficheiro é um backup completo. Usa "Restaurar backup" para o abrir.');
+    }
+    if (!data || typeof data !== 'object' || !data.match || !Array.isArray(data.occurrences)) {
+      throw new Error('Este ficheiro não é a exportação de um jogo do Analista Live.');
+    }
+    return data;
+  },
+
+  /**
+   * Importa UM jogo vindo de outro aparelho.
+   *
+   * Equipas e jogadores que já existam aqui NUNCA são escritos por cima: o que
+   * está neste aparelho pode ter mais (fotos, scouting) do que o ficheiro.
+   *
+   * @param {'replace'|'copy'} mode - `replace` substitui o jogo com o mesmo id
+   *   (apagando os registos antigos dele, senão ficavam duplicados); `copy`
+   *   entra como jogo novo e deixa o existente intacto.
+   */
+  async importMatch(data, mode = 'copy') {
+    const report = { teamsAdded: 0, playersAdded: 0, occurrences: 0, drawings: 0, matchId: null, mode };
+    for (const t of data.teams || []) {
+      if (!(await DB.get(DB.STORES.teams, t.id))) { await DB.put(DB.STORES.teams, t); report.teamsAdded++; }
+    }
+    for (const p of data.players || []) {
+      if (!(await DB.get(DB.STORES.players, p.id))) { await DB.put(DB.STORES.players, p); report.playersAdded++; }
+    }
+
+    const match = { ...data.match, updatedAt: Date.now() };
+    if (mode === 'copy') {
+      match.id = Utils.uid('match');
+      match.importedFrom = data.match.id;
+    } else {
+      const old = await DB.getAllByIndex(DB.STORES.occurrences, 'matchId', match.id);
+      for (const o of old) await DB.delete(DB.STORES.occurrences, o.id);
+      const oldDrawings = await DB.getAllByIndex(DB.STORES.drawings, 'matchId', match.id);
+      for (const d of oldDrawings) await DB.delete(DB.STORES.drawings, d.id);
+    }
+    await DB.put(DB.STORES.matches, match);
+    report.matchId = match.id;
+
+    for (const o of data.occurrences || []) {
+      await DB.put(DB.STORES.occurrences, { ...o, matchId: match.id, ...(mode === 'copy' ? { id: Utils.uid('occ') } : {}) });
+      report.occurrences++;
+    }
+    for (const d of data.drawings || []) {
+      await DB.put(DB.STORES.drawings, { ...d, matchId: match.id, ...(mode === 'copy' ? { id: Utils.uid('draw') } : {}) });
+      report.drawings++;
+    }
+    return report;
+  },
+
+  /** Lê e valida um ficheiro de backup completo. Lança um erro legível se não servir. */
+  async readBackupFile(file) {
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (e) {
+      throw new Error('Este ficheiro não é um JSON válido.');
+    }
+    if (!data || typeof data !== 'object' || !Array.isArray(data.matches)) {
+      throw new Error('Este ficheiro não é um backup completo do Analista Live. (O ficheiro de um só jogo não serve para restaurar tudo.)');
+    }
+    return data;
+  },
+
+  /**
+   * Restaura um backup já validado. A "canalização" da sincronização (sessão
+   * ligada, fila de envio, ids já aplicados) pertence a este aparelho e não aos
+   * dados — trazê-la de um backup antigo podia reenviar eventos velhos ao banco.
+   */
+  async restoreBackup(data) {
+    const copy = { ...data };
+    [DB.STORES.sessions, DB.STORES.syncQueue, DB.STORES.syncApplied].forEach((k) => { delete copy[k]; });
+    await DB.importAll(copy);
+    // As definições e a biblioteca vivem também em memória: sem as recarregar,
+    // a próxima gravação das Definições escrevia as antigas por cima.
+    await AppState.loadSettings();
+    await AppState.loadLibrary();
     return true;
+  },
+
+  async importFullBackup(file) {
+    return this.restoreBackup(await this.readBackupFile(file));
+  },
+
+  /**
+   * Partilha um texto: folha de partilha no iPad (WhatsApp, email, notas) e
+   * área de transferência no computador. Devolve o que aconteceu, para o ecrã
+   * poder dizer a verdade em vez de assumir que correu bem.
+   * @returns {Promise<'shared'|'copied'|'cancelled'|'failed'>}
+   */
+  async shareText(text, title = 'Analista Live') {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text });
+        return 'shared';
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return 'cancelled';
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      return 'copied';
+    } catch (e) {
+      return 'failed';
+    }
   },
 
   /** Lista de "Momentos para Rever" — minutos-chave para o Once Sport Analyser Pro. */

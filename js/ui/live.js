@@ -258,6 +258,7 @@ const LiveScreen = {
             <button class="more-item" id="more-stoppage">➕ Adicionar compensação</button>
             <button class="more-item" id="more-card">🟨 Registar cartão</button>
             <button class="more-item" id="more-sub">🔁 Registar substituição</button>
+            <button class="more-item" id="more-tactic">♟ Mudança tática</button>
             <button class="more-item" id="more-pair">📲 Ligar dispositivo do banco</button>
             <button class="more-item" id="more-mode-manage">🛠 Biblioteca de eventos</button>
             <button class="more-item" id="more-home">🏠 Ir para o início — o jogo continua</button>
@@ -619,31 +620,19 @@ const LiveScreen = {
   async undoLast() {
     const occ = this.lastOccurrence();
     if (!occ) return;
+    await this.deleteOccurrenceWithEffects(occ);
+    Utils.vibrate(20);
+    toast(`Removido: ${occ.eventName}`);
+  },
 
-    // 1 — Placar: tanto o golo do toque rápido como o remate marcado "Golo"
-    //    incrementaram o resultado — desfazer um tem de o repor.
-    const scoredGoal = (occ.source === 'golo')
-      || (occ.source === 'remate' && occ.meta?.result === 'goal');
-    if (scoredGoal && occ.team && this.match.score) {
-      const key = occ.team === 'own' ? 'team' : 'opponent';
-      this.match.score[key] = Math.max(0, (this.match.score[key] || 0) - 1);
-    }
-    // 2 — Cartão: sai também da lista de cartões do jogo.
-    if (occ.source === 'cartao') {
-      const pid = (occ.playerIds || [])[0];
-      const idx = [...(this.match.cards || [])].map((c, i) => ({ c, i }))
-        .filter(({ c }) => !pid || c.playerId === pid).pop();
-      if (idx) this.match.cards.splice(idx.i, 1);
-    }
-    // 3 — Substituição: repor o onze significa remover a substituição — o
-    //    LineupState volta a derivar o estado correto sozinho.
-    if (occ.source === 'substituicao') {
-      const [outId, inId] = occ.playerIds || [];
-      const idx = [...(this.match.substitutions || [])].map((s, i) => ({ s, i }))
-        .filter(({ s }) => s.outId === outId && s.inId === inId).pop();
-      if (idx) this.match.substitutions.splice(idx.i, 1);
-    }
-
+  /**
+   * Apaga uma ocorrência e reverte o que ela provocou no jogo (placar, cartões,
+   * substituição). É o único caminho usado pelo desfazer e pelo apagar no
+   * histórico, para os dois nunca divergirem. A reversão em si está em
+   * MatchEffects (pura, coberta pelos testes).
+   */
+  async deleteOccurrenceWithEffects(occ) {
+    const effects = MatchEffects.reverse(this.match, occ);
     await AppState.deleteOccurrence(occ.id);
     this.occurrences = this.occurrences.filter((o) => o.id !== occ.id);
     SyncCore.publish('occurrence', 'delete', { id: occ.id });
@@ -652,7 +641,7 @@ const LiveScreen = {
 
     this.updateTopBar();
     const scoreEl = document.querySelector('#live-score [data-team="team"]');
-    if (scoreEl) {
+    if (scoreEl && this.match.score) {
       scoreEl.textContent = this.match.score.team;
       document.querySelector('#live-score [data-team="opponent"]').textContent = this.match.score.opponent;
     }
@@ -662,8 +651,7 @@ const LiveScreen = {
     this.renderHistory();
     if (this.activeCategory === 'bola') this.renderBolaPanel();
     this.renderStatsIfOpen();
-    Utils.vibrate(20);
-    toast(`Removido: ${occ.eventName}`);
+    return effects;
   },
 
   /** Repete o último registo repetível, com os mesmos dados, na hora atual. */
@@ -1160,6 +1148,10 @@ const LiveScreen = {
       if (!inResult || inResult.players.length === 0) return;
       await this.commitSubstitution(side, outPlayer, inResult.players[0]);
     });
+    document.getElementById('more-tactic').addEventListener('click', () => {
+      dlgMore.close();
+      this.openTacticChange();
+    });
     document.getElementById('more-pair').addEventListener('click', () => {
       dlgMore.close();
       window.location.hash = `#/pair/${this.match.id}`;
@@ -1266,6 +1258,68 @@ const LiveScreen = {
     this.renderHistory();
     this.renderOnzeStrip();
     toast('Substituição registada');
+  },
+
+  /**
+   * Mudança de sistema a meio do jogo (ex.: passar a 3-5-2 aos 60'). Fica como
+   * registo próprio (`source: 'tatica'`): aparece no histórico, no pós-jogo e no
+   * resumo do jogo, e dá contexto aos números de cada parte. Não mexe no onze —
+   * quem está em campo continua a vir das substituições.
+   */
+  openTacticChange() {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'dialog';
+    dlg.id = 'dlg-tactic';
+    dlg.innerHTML = `
+      <div class="dialog-card">
+        <div class="stats-head"><h3>♟ Mudança tática</h3><button type="button" class="icon-btn" data-close title="Fechar">✕</button></div>
+        <p class="field-label">De quem</p>
+        <div class="stats-team-pick">
+          <button type="button" class="btn btn-lg result-btn selected" data-tside="own">${Utils.escapeHtml(this.match.team)}</button>
+          <button type="button" class="btn btn-lg result-btn" data-tside="opponent">${Utils.escapeHtml(this.match.opponent)}</button>
+        </div>
+        <label class="field"><span>Sistema</span>
+          <select id="tactic-formation">
+            ${FORMATION_PRESETS.map((f) => `<option value="${f.id}">${Utils.escapeHtml(f.name)}</option>`).join('')}
+            <option value="outro">Outro / não definido</option>
+          </select>
+        </label>
+        <label class="field"><span>Nota</span><input id="tactic-note" placeholder="Opcional — ex: passou a losango no meio"></label>
+        <div class="dialog-actions">
+          <button type="button" class="btn" data-close>Cancelar</button>
+          <button type="button" class="btn btn-primary" id="tactic-save">Registar</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+
+    let side = 'own';
+    dlg.querySelectorAll('[data-tside]').forEach((b) => b.addEventListener('click', () => {
+      side = b.dataset.tside;
+      dlg.querySelectorAll('[data-tside]').forEach((x) => x.classList.toggle('selected', x === b));
+    }));
+    const close = () => { dlg.close(); dlg.remove(); };
+    dlg.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', close));
+    dlg.addEventListener('cancel', () => dlg.remove());
+    dlg.querySelector('#tactic-save').addEventListener('click', async () => {
+      const sel = dlg.querySelector('#tactic-formation');
+      const name = sel.value === 'outro' ? '' : sel.options[sel.selectedIndex].textContent;
+      const note = dlg.querySelector('#tactic-note').value.trim();
+      const who = side === 'own' ? this.match.team : this.match.opponent;
+      await this.recordOccurrence({
+        eventName: `Mudança tática (${who})${name ? ': ' + name : ''}`,
+        category: side === 'own' ? 'nossa_equipa' : 'adversario',
+        team: side,
+        priority: 'important',
+        source: 'tatica',
+        type: 'neutral',
+        note,
+        meta: { formationId: sel.value === 'outro' ? null : sel.value, formationName: name || null },
+      });
+      close();
+      this.renderHistory();
+      toast('Mudança tática registada');
+    });
+    dlg.showModal();
   },
 
   /** Proposta de substituição vinda do banco: mostra um cartão para confirmar/ignorar. */
@@ -1671,12 +1725,11 @@ const LiveScreen = {
       toast('Jogadores atualizados');
     };
     document.getElementById('delete-occurrence').onclick = async () => {
-      if (!confirm('Apagar definitivamente este registo?')) return;
-      await AppState.deleteOccurrence(occ.id);
-      this.occurrences = this.occurrences.filter((o) => o.id !== occ.id);
+      // Apagar um golo, uma substituição ou um cartão mexe no jogo — diz-se o quê.
+      const effect = MatchEffects.describe(occ);
+      if (!confirm(`Apagar definitivamente este registo?${effect ? '\n\n' + effect : ''}`)) return;
       dlg.close();
-      this.renderButtons();
-      this.renderHistory();
+      await this.deleteOccurrenceWithEffects(occ);
       if (this._refreshFullHistory) this._refreshFullHistory();
       toast('Registo apagado');
     };

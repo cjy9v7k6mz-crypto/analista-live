@@ -22,6 +22,7 @@ const PostgameScreen = {
     const problems = eventsWithCounts.filter((e) => e.type === 'negative').sort((a, b) => b.count - a.count).slice(0, 8);
     const positives = eventsWithCounts.filter((e) => e.type === 'positive').sort((a, b) => b.count - a.count).slice(0, 8);
     const bench = occurrences.filter((o) => o.source === 'banco');
+    const tactics = occurrences.filter((o) => o.source === 'tatica').sort((a, b) => a.timestamp - b.timestamp);
     const moments = occurrences.filter((o) => o.source === 'momento');
     const notes = occurrences.filter((o) => o.source === 'nota');
     const momentsForReview = ExportManager.buildMomentsList(occurrences);
@@ -54,11 +55,29 @@ const PostgameScreen = {
           </table>
         </section>
 
+        <section class="once-panel">
+          <h2>⏱ 1ª Parte vs 2ª Parte</h2>
+          ${MatchStats.renderPeriodComparisonHTML(match, occurrences)}
+        </section>
+
         <div class="halftime-grid pg-maps-grid">
           <section class="ht-card">${MatchStats.renderMapHTML('shots', occurrences, match.team, match.opponent)}</section>
           <section class="ht-card">${MatchStats.renderMapHTML('fouls', occurrences, match.team, match.opponent)}</section>
           <section class="ht-card">${MatchStats.renderTransitionsMapHTML(occurrences, match.team, match.opponent)}</section>
         </div>
+
+        ${tactics.length ? `
+        <section class="once-panel">
+          <h2>♟ Mudanças táticas</h2>
+          <div class="pg-tactics">
+            ${tactics.map((t) => `
+              <div class="pg-tactic-row">
+                <span class="history-time">${t.period} ${String(t.minute).padStart(2, '0')}'</span>
+                <span><strong>${Utils.escapeHtml(t.meta?.formationName || 'Sistema alterado')}</strong> ${t.team === 'opponent' ? `<span class="muted">${Utils.escapeHtml(match.opponent)}</span>` : `<span class="muted">${Utils.escapeHtml(match.team)}</span>`}</span>
+                ${t.note ? `<span class="muted">"${Utils.escapeHtml(t.note)}"</span>` : ''}
+              </div>`).join('')}
+          </div>
+        </section>` : ''}
 
         <section class="once-panel">
           <h2>🎯 O que o scouting previa</h2>
@@ -103,6 +122,7 @@ const PostgameScreen = {
           </div>
           <div class="once-actions">
             <button class="btn" id="btn-copy-moments">📋 Copiar Minutos</button>
+            <button class="btn" id="btn-copy-summary">📝 Partilhar resumo do jogo</button>
             <button class="btn" id="btn-export-moments">Exportar Momentos (CSV)</button>
           </div>
         </section>
@@ -189,6 +209,16 @@ const PostgameScreen = {
     renderSketchPreview();
     document.getElementById('btn-open-sketch').addEventListener('click', () => {
       SketchPad.open(match.id, { onClose: renderSketchPreview });
+    });
+    document.getElementById('btn-copy-summary').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await ExportManager.shareText(MatchStats.matchSummaryText(match, occurrences), `${match.team} vs ${match.opponent}`);
+        toast({ shared: 'Resumo partilhado', copied: 'Resumo copiado', cancelled: 'Partilha cancelada', failed: 'Não foi possível partilhar o resumo' }[r]);
+      } finally {
+        btn.disabled = false;
+      }
     });
     document.getElementById('btn-export-moments').addEventListener('click', () => {
       ExportManager.exportMomentsCSV(match, momentsForReview);

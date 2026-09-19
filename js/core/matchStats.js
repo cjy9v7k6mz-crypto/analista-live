@@ -19,6 +19,7 @@ const MatchStats = {
     { key: 'goals', label: 'Golos' },
     { key: 'ownGoals', label: 'Autogolos' },
     { key: 'assists', label: 'Assistências' },
+    { key: 'chancesCreated', label: 'Grandes Oport. Criadas' },
     { key: 'shots', label: 'Remates' },
     { key: 'shotsOnTarget', label: 'Enquadrados' },
     { key: 'shotsOffTarget', label: 'Não Enquadrados' },
@@ -81,6 +82,24 @@ const MatchStats = {
     { key: 'lost', label: 'Perdido' },
   ],
 
+  /**
+   * Quem fez o passe que deu o remate ("grande oportunidade criada"), ou null.
+   *
+   * Compatibilidade: antes só se registava a assistência, e apenas nos golos —
+   * essa assistência É o passe que criou a oportunidade, por isso continua a
+   * contar nos jogos antigos.
+   */
+  passerOf(occ) {
+    if (!occ || occ.source !== 'remate') return null;
+    return occ.meta?.passerId || (occ.meta?.result === 'goal' ? (occ.meta?.assistId || null) : null);
+  },
+
+  /** Quem assistiu um remate marcado "Golo" (o passador desse remate), ou null. */
+  shotAssistOf(occ) {
+    if (!occ || occ.source !== 'remate' || occ.meta?.result !== 'goal') return null;
+    return occ.meta?.assistId || occ.meta?.passerId || null;
+  },
+
   empty() {
     const o = {};
     this.STAT_KEYS.forEach((k) => { o[k.key] = 0; });
@@ -103,9 +122,11 @@ const MatchStats = {
         const r = o.meta?.result;
         if (r === 'goal' || r === 'save') t.shotsOnTarget++;
         else if (r === 'wide' || r === 'post') t.shotsOffTarget++;
+        // O passe que deu o remate conta como grande oportunidade criada.
+        if (this.passerOf(o)) t.chancesCreated++;
         // Um remate marcado "Golo" pode ter assistência própria (não passa
         // pelo fluxo do placar) — conta-se aqui tal como a do golo por placar.
-        if (r === 'goal' && o.meta?.assistId) t.assists++;
+        if (this.shotAssistOf(o)) t.assists++;
       } else if (o.source === 'canto') {
         t.corners++;
       } else if (o.source === 'falta') {
@@ -254,6 +275,268 @@ const MatchStats = {
       </div>`;
   },
 
+  // ---------- Leitura de vários jogos ----------
+
+  /**
+   * Resumo da época de uma equipa: vitórias, empates, derrotas, golos e forma.
+   * Só jogos terminados. Não há pontos, porque a atribuição varia de prova para
+   * prova e não se inventa aqui.
+   */
+  seasonSummary(teamId, entries) {
+    const out = { played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0, form: [] };
+    entries
+      .filter((e) => e.match && e.match.status === 'finished')
+      .sort((a, b) => String(a.match.date || '').localeCompare(String(b.match.date || '')))
+      .forEach(({ match }) => {
+        const side = match.teams?.own?.teamId === teamId ? 'own'
+          : (match.teams?.opponent?.teamId === teamId ? 'opponent' : null);
+        if (!side) return;
+        const gf = side === 'own' ? (match.score?.team || 0) : (match.score?.opponent || 0);
+        const ga = side === 'own' ? (match.score?.opponent || 0) : (match.score?.team || 0);
+        out.played++;
+        out.goalsFor += gf;
+        out.goalsAgainst += ga;
+        const r = gf > ga ? 'V' : (gf < ga ? 'D' : 'E');
+        if (r === 'V') out.wins++; else if (r === 'D') out.losses++; else out.draws++;
+        out.form.push({ result: r, date: match.date, opponent: side === 'own' ? match.opponent : match.team, score: `${gf}-${ga}` });
+      });
+    return out;
+  },
+
+  /**
+   * Eventos do plano que se repetem de jogo para jogo — "isto é de um jogo ou é
+   * nosso?". Agrupa pelo evento da biblioteca (`libraryId`); os eventos criados
+   * à mão num jogo não têm biblioteca, por isso caem no nome em minúsculas.
+   * Só jogos terminados.
+   */
+  recurringPlanEvents(entries, { minMatches = 2 } = {}) {
+    const byKey = new Map();
+    entries.forEach(({ match, occurrences }) => {
+      if (!match || match.status !== 'finished') return;
+      const counts = {};
+      (occurrences || []).forEach((o) => { if (o.planEventId) counts[o.planEventId] = (counts[o.planEventId] || 0) + 1; });
+      (match.observationPlan || []).forEach((e) => {
+        const key = e.libraryId || `nome:${String(e.name || '').toLowerCase()}`;
+        const rec = byKey.get(key) || { key, name: e.name, type: e.type || 'neutral', category: e.category, planned: 0, happened: 0, total: 0, lastDate: null };
+        rec.planned++;
+        const n = counts[e.id] || 0;
+        if (n) {
+          rec.happened++;
+          rec.total += n;
+          if (!rec.lastDate || String(match.date) > String(rec.lastDate)) rec.lastDate = match.date;
+        }
+        byKey.set(key, rec);
+      });
+    });
+    return [...byKey.values()]
+      .filter((r) => r.happened >= minMatches)
+      .sort((a, b) => b.happened - a.happened || b.total - a.total);
+  },
+
+  /**
+   * Resumo do jogo em texto simples, para colar no WhatsApp ou no email do staff.
+   * Só entra o que foi registado; secções sem dados não aparecem.
+   */
+  matchSummaryText(match, occurrences) {
+    const st = this.compute(match, occurrences);
+    const lines = [];
+    const head = [`${match.team} ${match.score?.team ?? 0} - ${match.score?.opponent ?? 0} ${match.opponent}`];
+    if (match.competition) head.push(match.competition);
+    if (match.date) head.push(Utils.formatDate(match.date));
+    lines.push(head.join(' · '));
+
+    const pair = (label, key) => (st.own[key] || st.opp[key] ? `${label} ${st.own[key]}-${st.opp[key]}` : null);
+    const numbers = [
+      pair('Remates', 'shots'),
+      pair('Enquadrados', 'shotsOnTarget'),
+      pair('Cantos', 'corners'),
+      pair('Faltas', 'foulsCommitted'),
+      pair('Oport. criadas', 'chancesCreated'),
+    ].filter(Boolean);
+    if (numbers.length) lines.push(numbers.join(' · '));
+
+    const pc = this.periodComparison(match, occurrences);
+    if (pc.comparable && pc.highlights.length) {
+      lines.push('Entre as partes: ' + pc.highlights
+        .map((h) => `${h.label} ${h.from} → ${h.to}${h.side === 'opp' ? ' (adversário)' : ''}`)
+        .join(' · '));
+    }
+
+    const chains = this.setPieceChains(occurrences);
+    const sp = [];
+    if (chains.own.corners.total) sp.push(`cantos ${chains.own.corners.withShot}/${chains.own.corners.total} com remate`);
+    const speed = this.transitionSpeed(occurrences);
+    if (speed.recoveries) sp.push(`recuperações com remate em ${this.CHAIN_WINDOW.transition}s: ${speed.converted}/${speed.recoveries}`);
+    const costly = this.costlyLosses(occurrences, match);
+    if (costly.total) sp.push(`${costly.total} ${costly.total === 1 ? 'perda que custou golo' : 'perdas que custaram golo'}`);
+    if (sp.length) lines.push('Padrões: ' + sp.join(' · '));
+
+    const tactics = occurrences.filter((o) => o.source === 'tatica').sort((a, b) => a.timestamp - b.timestamp);
+    if (tactics.length) {
+      lines.push('Mudanças táticas: ' + tactics
+        .map((t) => `${t.minute}' ${t.meta?.formationName || 'sistema alterado'}${t.team === 'opponent' ? ' (adversário)' : ''}`)
+        .join(' · '));
+    }
+
+    const moments = occurrences.filter((o) => o.source === 'momento').sort((a, b) => a.timestamp - b.timestamp);
+    if (moments.length) {
+      lines.push('Momentos:');
+      moments.slice(0, 8).forEach((m) => lines.push(`· ${String(m.minute).padStart(2, '0')}' ${(m.note || '').trim() || 'momento marcado'}`));
+      if (moments.length > 8) lines.push(`· (+${moments.length - 8})`);
+    }
+    return lines.join('\n');
+  },
+
+  // ---------- 1ª parte vs 2ª parte ----------
+
+  /** Partes comparáveis. O prolongamento junta as suas duas metades. */
+  PERIOD_GROUPS: [
+    { key: '1T', label: '1ª Parte', periods: ['1T'] },
+    { key: '2T', label: '2ª Parte', periods: ['2T'] },
+    { key: 'ET', label: 'Prolong.', periods: ['ET1', 'ET2'] },
+  ],
+
+  /** Linhas da comparação, por ordem. `ownOnly`: só existe do nosso ponto de vista. */
+  PERIOD_ROWS: [
+    { key: 'goals', label: 'Golos' },
+    { key: 'shots', label: 'Remates' },
+    { key: 'shotsOnTarget', label: 'Enquadrados' },
+    { key: 'chancesCreated', label: 'Grandes oport. criadas' },
+    { key: 'corners', label: 'Cantos' },
+    { key: 'dangerousAttacks', label: 'Ataques Perigosos' },
+    { key: 'freeKicks', label: 'Livres' },
+    { key: 'penalties', label: 'Penáltis' },
+    { key: 'foulsCommitted', label: 'Faltas Cometidas' },
+    { key: 'offside', label: 'Fora de Jogo' },
+    { key: 'saves', label: 'Defesas do GR' },
+    { key: 'yellowCards', label: 'Amarelos' },
+    { key: 'redCards', label: 'Vermelhos' },
+    { key: 'perdas', label: 'Perdas de bola', ownOnly: true },
+    { key: 'recuperacoes', label: 'Recuperações', ownOnly: true },
+  ],
+
+  /** Diferença mínima (em valor absoluto) para uma linha ser destacada. */
+  PERIOD_HIGHLIGHT_MIN_DELTA: 3,
+
+  /** Golos de uma equipa numa lista de ocorrências: golo pelo placar + remate marcado "Golo". */
+  _goalsFrom(list, team) {
+    return list.filter((o) => o.team === team
+      && (o.source === 'golo' || (o.source === 'remate' && o.meta?.result === 'goal'))).length;
+  },
+
+  /**
+   * Números de cada parte, lado a lado.
+   *
+   * O resultado final vem do placar (fonte única); por parte o placar não diz
+   * nada, por isso os golos de cada parte contam-se pelos registos de golo — e
+   * se a soma não bater com o resultado isso fica dito (goalsCheck), não
+   * escondido. Registos feitos fora do tempo de jogo (ex.: intervalo) não entram.
+   */
+  periodComparison(match, occurrences) {
+    const groups = this.PERIOD_GROUPS.map((g) => {
+      const subset = occurrences.filter((o) => g.periods.includes(o.period));
+      const st = this.compute({ score: { team: 0, opponent: 0 } }, subset);
+      st.own.goals = this._goalsFrom(subset, 'own');
+      st.opp.goals = this._goalsFrom(subset, 'opponent');
+      st.own.perdas = subset.filter((o) => o.source === 'perda').length;
+      st.own.recuperacoes = subset.filter((o) => o.source === 'recuperacao').length;
+      return { key: g.key, label: g.label, count: subset.length, own: st.own, opp: st.opp };
+    });
+    const [first, second, extra] = groups;
+    const inPlay = new Set(this.PERIOD_GROUPS.flatMap((g) => g.periods));
+
+    const highlights = [];
+    if (first.count && second.count) {
+      this.PERIOD_ROWS.forEach((row) => {
+        (row.ownOnly ? ['own'] : ['own', 'opp']).forEach((side) => {
+          const from = first[side][row.key] || 0;
+          const to = second[side][row.key] || 0;
+          if (Math.abs(to - from) >= this.PERIOD_HIGHLIGHT_MIN_DELTA) {
+            highlights.push({ side, key: row.key, label: row.label, from, to, delta: to - from });
+          }
+        });
+      });
+      highlights.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    }
+
+    const recorded = (side) => groups.reduce((n, g) => n + g[side].goals, 0);
+    return {
+      groups,
+      shown: extra.count ? groups : [first, second],
+      comparable: first.count > 0 && second.count > 0,
+      outsidePlay: occurrences.filter((o) => !inPlay.has(o.period)).length,
+      goalsCheck: {
+        own: { recorded: recorded('own'), score: match.score?.team || 0 },
+        opp: { recorded: recorded('opp'), score: match.score?.opponent || 0 },
+      },
+      highlights: highlights.slice(0, 4),
+    };
+  },
+
+  /** Notas em texto simples — servem o ecrã e o PDF, por isso sem símbolos fora do WinAnsi. */
+  periodNotes(pc, match) {
+    const notes = ['As partes não duram o mesmo (descontos): os números são totais, não médias por minuto.'];
+    [['own', match.team], ['opp', match.opponent]].forEach(([side, name]) => {
+      const g = pc.goalsCheck[side];
+      if (g.recorded !== g.score) {
+        notes.push(`${name}: os golos por parte contam-se pelos registos de golo (${g.recorded}), que não batem com o resultado (${g.score}).`);
+      }
+    });
+    if (pc.outsidePlay) {
+      const one = pc.outsidePlay === 1;
+      notes.push(`${pc.outsidePlay} ${one ? 'registo feito' : 'registos feitos'} fora do tempo de jogo (ex.: intervalo) não ${one ? 'entra' : 'entram'} na comparação.`);
+    }
+    return notes;
+  },
+
+  renderPeriodComparisonHTML(match, occurrences) {
+    const pc = this.periodComparison(match, occurrences);
+    if (!pc.comparable) {
+      return '<p class="muted">A comparação aparece quando houver registos das duas partes.</p>';
+    }
+    const cols = pc.shown;
+    const first = pc.groups[0];
+    const ownName = Utils.escapeHtml(match.team);
+    const oppName = Utils.escapeHtml(match.opponent);
+    const rows = this.PERIOD_ROWS.filter((r) => cols.some((g) => g.own[r.key] || (!r.ownOnly && g.opp[r.key])));
+
+    // Seta neutra de propósito: mais perdas não é "subir" no bom sentido.
+    const cell = (g, side, key) => {
+      const v = g[side][key] || 0;
+      let delta = '';
+      if (g.key === '2T') {
+        const d = v - (first[side][key] || 0);
+        if (d) delta = `<span class="pc-delta">${d > 0 ? '▲' : '▼'}${Math.abs(d)}</span>`;
+      }
+      return `<td class="pc-val">${v}${delta}</td>`;
+    };
+
+    return `
+      <div class="period-compare">
+        ${pc.highlights.length ? `
+          <ul class="pc-highlights">
+            ${pc.highlights.map((h) => `<li><strong>${h.side === 'own' ? ownName : oppName}</strong> · ${h.label}: ${h.from} → ${h.to} na 2ª parte</li>`).join('')}
+          </ul>` : `<p class="muted pat-intro">Sem diferenças de ${this.PERIOD_HIGHLIGHT_MIN_DELTA} ou mais entre as partes.</p>`}
+        <div class="pc-wrap">
+          <table class="pc-table">
+            <thead>
+              <tr><th></th><th colspan="${cols.length}" class="pc-team">${ownName}</th><th colspan="${cols.length}" class="pc-team">${oppName}</th></tr>
+              <tr><th></th>${cols.map((g) => `<th>${g.label}</th>`).join('')}${cols.map((g) => `<th>${g.label}</th>`).join('')}</tr>
+            </thead>
+            <tbody>
+              ${rows.map((r) => `
+                <tr>
+                  <td class="pc-label">${r.label}</td>
+                  ${cols.map((g) => cell(g, 'own', r.key)).join('')}
+                  ${r.ownOnly ? cols.map(() => '<td class="pc-val muted">—</td>').join('') : cols.map((g) => cell(g, 'opp', r.key)).join('')}
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        ${this.periodNotes(pc, match).map((n) => `<p class="muted pat-note">${Utils.escapeHtml(n)}</p>`).join('')}
+      </div>`;
+  },
+
   // ---------- Padrões (leitura derivada — não pede nenhum registo novo) ----------
   //
   // Tudo o que está abaixo é calculado a partir de ocorrências que já existem.
@@ -263,6 +546,13 @@ const MatchStats = {
 
   /** Janelas de tempo (segundos) usadas para ligar acontecimentos em cadeia. */
   CHAIN_WINDOW: { transition: 30, costlyLoss: 20 },
+
+  /** Mediana de uma lista JÁ ordenada; com um número par de valores é a média dos dois do meio. */
+  _median(sorted) {
+    if (!sorted.length) return null;
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+  },
 
   /** Segundos entre duas ocorrências, usando o relógio de jogo (minuto+segundo). */
   _gapSeconds(a, b) {
@@ -299,6 +589,7 @@ const MatchStats = {
         ? rows.filter((r) => inShootingZone(r.occ) || r.shots.length)
         : rows;
       const baseWithShot = base.filter((r) => r.shots.length).length;
+      const baseSet = new Set(base);
       return {
         total: rows.length,
         withShot: rows.filter((r) => r.shots.length).length,
@@ -308,7 +599,9 @@ const MatchStats = {
         baseWithShot,
         baseGoals: base.reduce((n, r) => n + r.goals, 0),
         shotPct: base.length ? Math.round((baseWithShot / base.length) * 100) : 0,
-        outOfZone: rows.length - base.length,
+        // Fora da zona = tem localização e não conta. Os sem localização ficam
+        // só em `noLocation` — total = base + outOfZone + noLocation.
+        outOfZone: rows.filter((r) => !baseSet.has(r) && r.occ.meta?.location?.y != null).length,
         noLocation: rows.filter((r) => r.occ.meta?.location?.y == null && !r.shots.length).length,
         rows,
       };
@@ -359,7 +652,7 @@ const MatchStats = {
       converted: pairs.length,
       pct: recs.length ? Math.round((pairs.length / recs.length) * 100) : 0,
       goals: pairs.filter((p) => p.goal).length,
-      medianSeconds: secs.length ? secs[Math.floor(secs.length / 2)] : null,
+      medianSeconds: this._median(secs),
       pairs,
     };
   },
@@ -436,6 +729,52 @@ const MatchStats = {
       confirmed: rows.filter((r) => r.count > 0).sort((a, b) => b.count - a.count),
       unseen: rows.filter((r) => r.count === 0),
     };
+  },
+
+  /**
+   * O scouting a aprender com os jogos: para cada item do dossiê, em quantos
+   * jogos terminados contra este adversário esteve no plano de observação e em
+   * quantos chegou mesmo a acontecer. Calculado sempre a partir dos jogos — não
+   * se grava no dossiê, para nunca ficar desatualizado nem duplicado.
+   *
+   * Só jogos terminados: um plano de um jogo por jogar diria "não se viu" sem
+   * ter havido jogo. O mesmo item importado duas vezes no mesmo plano conta um
+   * só jogo.
+   *
+   * @param {Array<{match, occurrences}>} entries — jogos contra a equipa
+   * @returns {Map<string, {tracked: number, confirmed: number, occurrences: number, lastConfirmedDate: string|null}>}
+   */
+  scoutingTrackRecord(entries) {
+    const out = new Map();
+    entries.forEach(({ match, occurrences }) => {
+      if (!match || match.status !== 'finished') return;
+      const sc = this.scoutingCheck(match, occurrences || []);
+      const perItem = new Map();
+      [...sc.confirmed, ...sc.unseen].forEach((r) => {
+        const id = r.event.scoutingRef && r.event.scoutingRef.itemId;
+        if (id) perItem.set(id, (perItem.get(id) || 0) + r.count);
+      });
+      perItem.forEach((count, id) => {
+        const rec = out.get(id) || { tracked: 0, confirmed: 0, occurrences: 0, lastConfirmedDate: null };
+        rec.tracked++;
+        if (count > 0) {
+          rec.confirmed++;
+          rec.occurrences += count;
+          if (match.date && (!rec.lastConfirmedDate || match.date > rec.lastConfirmedDate)) rec.lastConfirmedDate = match.date;
+        }
+        out.set(id, rec);
+      });
+    });
+    return out;
+  },
+
+  /** Frase curta do histórico de um item ('' se nunca esteve num plano de jogo terminado). */
+  trackRecordLabel(rec) {
+    if (!rec || !rec.tracked) return '';
+    const jogos = (n) => `${n} ${n === 1 ? 'jogo' : 'jogos'}`;
+    // Neutro de propósito: não se ter visto tanto pode ser leitura errada como mérito da equipa.
+    if (rec.confirmed) return `Confirmado em ${rec.confirmed} de ${jogos(rec.tracked)}`;
+    return `Observado em ${jogos(rec.tracked)}, nunca confirmado`;
   },
 
   /** Bloco do fecho do ciclo do scouting (intervalo e pós-jogo). */

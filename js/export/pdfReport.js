@@ -30,6 +30,7 @@ const PDFReport = {
     { key: 'lineups', label: 'Onze Inicial (as duas equipas)' },
     { key: 'substitutions', label: 'Substituições' },
     { key: 'stats', label: 'Estatísticas Gerais' },
+    { key: 'periods', label: '1ª Parte vs 2ª Parte' },
     { key: 'goals', label: 'Golos (marcador/assistência)' },
     { key: 'shots', label: 'Remates (lista)' },
     { key: 'keepers', label: 'Guarda-redes (defesas)' },
@@ -83,6 +84,7 @@ const PDFReport = {
     if (has('lineups')) this.sectionLineups(S);
     if (has('substitutions')) this.sectionSubstitutions(S);
     if (has('stats')) this.sectionStats(S);
+    if (has('periods')) this.sectionPeriods(S);
     if (has('goals')) this.sectionGoals(S);
     if (has('shots')) this.sectionShots(S);
     if (has('keepers')) this.sectionKeepers(S);
@@ -122,7 +124,7 @@ const PDFReport = {
     const header = S.headerText || (m ? `${m.team}  ${m.score.team} - ${m.score.opponent}  ${m.opponent}` : '');
     if (header) {
       S.page.drawText(this.sanitize(header), {
-        x: S.margin, y: S.H - 28, size: 8, font: S.font, color: S.rgb(...this.COLORS.muted),
+        x: S.margin, y: S.H - 28, size: 8, font: S.font, color: S.rgb(...(S.mutedColor || this.COLORS.muted)),
       });
     }
     S.page.drawLine({
@@ -184,7 +186,7 @@ const PDFReport = {
   },
 
   empty(S, msg = 'Sem dados registados.') {
-    this.text(S, msg, { color: this.COLORS.muted, size: 9 });
+    this.text(S, msg, { color: S.mutedColor || this.COLORS.muted, size: 9 });
     S.y -= 4;
   },
 
@@ -195,7 +197,7 @@ const PDFReport = {
     this.ensure(S, 26);
     let x = S.margin;
     headers.forEach((h, i) => {
-      S.page.drawText(this.sanitize(h), { x: x + 2, y: S.y, size: 8.5, font: S.fontBold, color: S.rgb(...this.COLORS.muted) });
+      S.page.drawText(this.sanitize(h), { x: x + 2, y: S.y, size: 8.5, font: S.fontBold, color: S.rgb(...(S.mutedColor || this.COLORS.muted)) });
       x += cols[i];
     });
     S.y -= 6;
@@ -509,22 +511,56 @@ const PDFReport = {
     all.forEach((p) => {
       const evs = S.ctx.occurrences.filter((o) => (o.playerIds || []).includes(p.id));
       if (!evs.length) return; // só jogadores com dados reais
-      // Um remate marcado "Golo" pode ter um segundo jogador tagged como
-      // assistência — esse remate conta só a assistência, não remate/golo dele.
-      const shots = evs.filter((e) => e.source === 'remate' && e.meta?.assistId !== p.id);
-      const assists = evs.filter((e) => (e.source === 'golo' || (e.source === 'remate' && e.meta?.result === 'goal')) && e.meta?.assistId === p.id).length;
+      // Um remate pode ter um segundo jogador tagged: quem fez o passe. Esse
+      // remate não conta como remate dele — conta como oportunidade criada.
+      const shots = evs.filter((e) => e.source === 'remate' && MatchStats.passerOf(e) !== p.id);
+      const chances = evs.filter((e) => MatchStats.passerOf(e) === p.id).length;
+      const assists = evs.filter((e) => (e.source === 'golo' && e.meta?.assistId === p.id) || MatchStats.shotAssistOf(e) === p.id).length;
       rows.push([
         `${p.number || '-'} ${p.shortName || p.name}`,
         String(evs.length),
         String(shots.length),
         String(shots.filter((e) => e.meta?.result === 'goal').length),
         String(assists),
+        String(chances),
         String(evs.filter((e) => e.source === 'falta' && e.meta?.committedById === p.id).length),
         String(evs.filter((e) => e.source === 'cartao').length),
       ]);
     });
     if (!rows.length) return this.empty(S, 'Nenhum evento foi associado a jogadores neste jogo.');
-    this.table(S, ['Jogador', 'Eventos', 'Remates', 'Golos', 'Assist.', 'Faltas', 'Cartões'], rows, [0.28, 0.12, 0.12, 0.11, 0.11, 0.13, 0.13]);
+    this.table(S, ['Jogador', 'Eventos', 'Remates', 'Golos', 'Assist.', 'GOC', 'Faltas', 'Cartões'], rows, [0.26, 0.11, 0.11, 0.10, 0.10, 0.10, 0.11, 0.11]);
+  },
+
+  /** 1ª parte vs 2ª parte — os números de cada parte lado a lado. */
+  sectionPeriods(S) {
+    this.h1(S, '4a. 1ª Parte vs 2ª Parte');
+    const { match, occurrences } = S.ctx;
+    const pc = MatchStats.periodComparison(match, occurrences);
+    if (!pc.comparable) return this.empty(S, 'Só há registos de uma das partes - a comparação precisa das duas.');
+    const cols = pc.shown;
+    const short = { '1T': '1P', '2T': '2P', ET: 'Prol.' };
+    const headers = ['Estatística',
+      ...cols.map((g) => `Nossa ${short[g.key]}`),
+      ...cols.map((g) => `Adv. ${short[g.key]}`)];
+    const rows = MatchStats.PERIOD_ROWS
+      .filter((r) => cols.some((g) => g.own[r.key] || (!r.ownOnly && g.opp[r.key])))
+      .map((r) => [r.label,
+        ...cols.map((g) => String(g.own[r.key] || 0)),
+        ...cols.map((g) => (r.ownOnly ? '-' : String(g.opp[r.key] || 0)))]);
+    const firstW = 0.28;
+    const restW = (1 - firstW) / (cols.length * 2);
+    this.table(S, headers, rows, [firstW, ...Array(cols.length * 2).fill(restW)]);
+    if (pc.highlights.length) {
+      S.y -= 4;
+      this.text(S, `Diferenças de ${MatchStats.PERIOD_HIGHLIGHT_MIN_DELTA} ou mais entre as partes:`, { size: 9, bold: true });
+      pc.highlights.forEach((h) => {
+        const who = h.side === 'own' ? match.team : match.opponent;
+        this.text(S, `${who} - ${h.label}: passou de ${h.from} para ${h.to} (${h.delta > 0 ? '+' : ''}${h.delta}).`, { size: 9 });
+      });
+    }
+    S.y -= 4;
+    MatchStats.periodNotes(pc, match).forEach((n) => this.text(S, n, { color: this.COLORS.muted, size: 8 }));
+    S.y -= 4;
   },
 
   /**

@@ -65,6 +65,18 @@ const SettingsScreen = {
             </select>
           </label>
 
+          <h2 class="section-title">Segurança dos dados</h2>
+          <p class="muted settings-note">
+            Os jogos, o scouting, os plantéis e a biblioteca ficam guardados só neste
+            aparelho. A sincronização com o banco leva apenas o jogo em curso — não é
+            uma cópia de segurança. Faz backups regulares e guarda o ficheiro fora do iPad.
+          </p>
+          <div class="data-safety" id="data-safety"><p class="muted">A verificar…</p></div>
+          <div class="backup-panel">
+            <button type="button" class="btn" id="btn-settings-backup">💾 Fazer backup agora</button>
+            <button type="button" class="btn" data-nav="#/games">Restaurar um backup…</button>
+          </div>
+
           <h2 class="section-title">Sincronização (multi-dispositivo)</h2>
           <p class="muted settings-note">
             Para ligar o iPad do banco quando está noutra rede, é preciso um projeto
@@ -162,6 +174,44 @@ const SettingsScreen = {
         r.ok ? '✅ Ligação OK — escrita e tempo real a funcionar.' : '❌ ' + r.error,
       ].join('\n');
       btn.disabled = false; btn.textContent = '🔌 Testar ligação ao Supabase';
+    });
+
+    // ---------- Segurança dos dados ----------
+    const paintSafety = async () => {
+      const el = document.getElementById('data-safety');
+      if (!el) return;
+      const status = await DataSafety.storageStatus();
+      const last = AppState.settings?.lastBackupAt;
+      const protection = !status.supported
+        ? '<strong class="ds-muted">Não disponível neste browser</strong>'
+        : (status.persisted ? '<strong class="ds-ok">✅ Protegido</strong>' : '<strong class="ds-warn">⚠️ Não protegido</strong>');
+      el.innerHTML = `
+        <div class="ds-row"><span>Proteção do armazenamento</span>${protection}</div>
+        ${status.supported && !status.persisted ? `
+          <p class="muted settings-note">Sem proteção, o browser pode limpar os dados se o aparelho ficar sem espaço.
+            <button type="button" class="btn btn-small" id="btn-request-persist">Pedir proteção</button></p>` : ''}
+        <div class="ds-row"><span>Último backup</span><strong class="${last ? '' : 'ds-warn'}">${last ? `${Utils.formatDate(last)} · ${DataSafety.relativeDays(last)}` : 'Nunca'}</strong></div>
+        ${status.usage != null ? `<div class="ds-row"><span>Espaço ocupado pela app</span><strong>${DataSafety.formatBytes(status.usage)}</strong></div>` : ''}`;
+      document.getElementById('btn-request-persist')?.addEventListener('click', async () => {
+        const granted = await DataSafety.requestPersistence();
+        toast(granted ? 'Armazenamento protegido' : 'O browser não concedeu a proteção — faz backups regulares');
+        paintSafety();
+      });
+    };
+    paintSafety();
+    document.getElementById('btn-settings-backup').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await ExportManager.exportFullBackup();
+        toast(r.ok ? 'Backup completo exportado' : 'Backup cancelado — nada foi guardado');
+        if (r.ok) paintSafety();
+      } catch (err) {
+        console.error('Backup falhou:', err);
+        alert('Não foi possível criar o backup: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
     });
 
     document.getElementById('settings-form').addEventListener('submit', async (e) => {

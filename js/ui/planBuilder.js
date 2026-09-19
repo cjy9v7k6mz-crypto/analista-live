@@ -25,6 +25,7 @@ const PlanBuilderScreen = {
         <header class="screen-header">
           <button class="icon-btn" data-nav="#/dashboard" aria-label="Voltar">←</button>
           <h1>Plano de Observação</h1>
+          <button class="btn" id="btn-briefing" title="Folha para o treinador, antes do jogo">📄 Briefing</button>
           <button class="btn btn-primary" id="btn-start-live">Continuar → Onze Inicial</button>
         </header>
         <p class="screen-subtitle">${Utils.escapeHtml(this.match.team)} vs ${Utils.escapeHtml(this.match.opponent)}</p>
@@ -205,6 +206,17 @@ const PlanBuilderScreen = {
     // Os marcados com ⭐ no scouting vêm pré-selecionados.
     collected.sort((a, b) => (b.useAsFocus ? 1 : 0) - (a.useAsFocus ? 1 : 0));
 
+    // O que cada item deu nos jogos já terminados contra este adversário — ajuda
+    // a escolher o que observar. Este jogo, ainda por jogar, não entra.
+    let trackRecord = new Map();
+    if (team) {
+      const past = (await DB.getAll(DB.STORES.matches))
+        .filter((m) => m.id !== this.match.id && m.teams?.opponent?.teamId === team.id);
+      const entries = [];
+      for (const m of past) entries.push({ match: m, occurrences: await AppState.getOccurrences(m.id) });
+      trackRecord = MatchStats.scoutingTrackRecord(entries);
+    }
+
     const dlg = document.createElement('dialog');
     dlg.className = 'dialog dialog-wide';
     dlg.id = 'dlg-scouting-import';
@@ -224,6 +236,7 @@ const PlanBuilderScreen = {
                 <span class="sc-badge">${it._list.icon} ${it._list.title}</span>
                 <span class="sc-import-title">${Utils.escapeHtml(it.title)}</span>
                 ${it.useAsFocus ? '<span class="sc-badge">⭐ Foco</span>' : ''}
+                ${MatchStats.trackRecordLabel(trackRecord.get(it.id)) ? `<span class="sc-badge sc-badge-track">${Utils.escapeHtml(MatchStats.trackRecordLabel(trackRecord.get(it.id)))}</span>` : ''}
               </label>
             `).join('')}
           </div>`}
@@ -352,6 +365,39 @@ const PlanBuilderScreen = {
     document.getElementById('btn-new-library-event').addEventListener('click', () => dlgNew.showModal());
 
     // Importar focos do scouting do adversário (secção "Ligação ao plano de jogo").
+    document.getElementById('btn-briefing').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const oppId = this.match.teams?.opponent?.teamId;
+        const ownId = this.match.teams?.own?.teamId;
+        // O histórico de cada item vem dos jogos já terminados contra este
+        // adversário — este jogo, por jogar, não entra.
+        let trackRecord = new Map();
+        if (oppId) {
+          const past = (await DB.getAll(DB.STORES.matches))
+            .filter((x) => x.id !== this.match.id && x.teams?.opponent?.teamId === oppId);
+          const entries = [];
+          for (const x of past) entries.push({ match: x, occurrences: await AppState.getOccurrences(x.id) });
+          trackRecord = MatchStats.scoutingTrackRecord(entries);
+        }
+        await PDFBriefing.generate({
+          match: this.match,
+          planEvents: this.planEvents,
+          ownTeam: ownId ? await DB.get(DB.STORES.teams, ownId) : null,
+          opponentTeam: oppId ? await DB.get(DB.STORES.teams, oppId) : null,
+          ownPlayers: ownId ? await AppState.getTeamPlayers(ownId) : [],
+          opponentPlayers: oppId ? await AppState.getTeamPlayers(oppId) : [],
+          trackRecord,
+        });
+        toast('Briefing gerado');
+      } catch (err) {
+        console.error('Briefing falhou:', err);
+        alert('Não foi possível gerar o briefing: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
     document.getElementById('btn-import-scouting').addEventListener('click', () => this.openScoutingImport());
     document.getElementById('cancel-new-event').addEventListener('click', () => dlgNew.close());
     document.getElementById('form-new-event').addEventListener('submit', async (e) => {

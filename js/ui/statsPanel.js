@@ -145,6 +145,8 @@ const StatsPanel = {
     if (!match) return;
     await AppState.deleteOccurrence(match.id);
     this.live.occurrences = this.live.occurrences.filter((o) => o.id !== match.id);
+    // Sem isto o banco continuava a contar o +1 que foi retirado.
+    SyncCore.publish('occurrence', 'delete', { id: match.id });
   },
 
   // ---------- Remate ----------
@@ -174,7 +176,7 @@ const StatsPanel = {
       eventName: 'Remate',
       category: side === 'own' ? 'nossa_equipa' : 'adversario',
       team: side, priority: 'important', source: 'remate', type: 'neutral',
-      meta: { origin: null, result: null, goalZone: null, ...extraMeta },
+      meta: { origin: null, result: null, goalZone: null, passerId: null, ...extraMeta },
     });
     toast('⚽ Remate registado');
     this.refreshLiveViews();
@@ -203,10 +205,11 @@ const StatsPanel = {
           <p class="field-label">Zona da baliza (onde a bola foi)</p>
           ${this.goalGraphicHTML('shot-goal-zone')}
         </div>
-        <div id="shot-assist-wrap" hidden>
-          <p class="field-label">Assistência <span class="muted">(opcional)</span></p>
-          <button class="btn btn-small" id="shot-pick-assist">＋ Escolher jogador</button>
-          <span id="shot-assist-chosen" class="muted"></span>
+        <div id="shot-passer-wrap">
+          <p class="field-label">Quem passou <span class="muted">(grande oportunidade criada — deixa vazio se não houve passe)</span></p>
+          <button class="btn btn-small" id="shot-pick-passer">＋ Escolher jogador</button>
+          <span id="shot-passer-chosen" class="muted"></span>
+          <p class="muted" id="shot-passer-note" hidden>Como o remate foi golo, este passe conta também como assistência.</p>
         </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-primary" id="shot-done">Concluir</button>
@@ -215,22 +218,27 @@ const StatsPanel = {
     `;
 
     let chosenPlayerId = null;
-    let chosenAssistId = null;
-    // Assistência "ativa": perguntada sozinha assim que o remate fica marcado
-    // como golo — não obriga a lembrar de tocar num botão extra.
-    let assistAsked = false;
+    // Quem passou: perguntado sozinho logo a seguir ao rematador — é daqui que
+    // saem as grandes oportunidades criadas. Nem todo o remate nasce de um passe
+    // (jogada individual, ressalto, livre direto), por isso "Desconhecido"
+    // resolve e o remate fica sem passador em vez de ter um inventado.
+    let chosenPasserId = MatchStats.passerOf(occ);
+    let passerAsked = !!chosenPasserId;
     const roster = () => side === 'own'
       ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
       : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
-    const askAssistIfGoal = async () => {
-      if (occ.meta.result !== 'goal' || assistAsked) return;
-      assistAsked = true;
+    const setPasser = (p) => {
+      chosenPasserId = p ? p.id : chosenPasserId;
+      const el = this.live.findPlayerById(chosenPasserId);
+      this._dlg.querySelector('#shot-passer-chosen').textContent = el ? (el.shortName || el.name) : '';
+    };
+    setPasser(null);
+    const askPasser = async () => {
+      if (passerAsked) return;
+      passerAsked = true;
       const players = roster()[0].players.filter((p) => p.id !== chosenPlayerId);
-      const r = await PlayerPicker.open({ title: 'Assistência (opcional)', groups: [{ label: roster()[0].label, players }], multi: false });
-      if (r && r.players.length) {
-        chosenAssistId = r.players[0].id;
-        this._dlg.querySelector('#shot-assist-chosen').textContent = r.players[0].shortName || r.players[0].name;
-      }
+      const r = await PlayerPicker.open({ title: 'Quem passou? (grande oportunidade criada)', groups: [{ label: roster()[0].label, players }], multi: false });
+      if (r && r.players.length) setPasser(r.players[0]);
     };
 
     this._dlg.querySelector('#shot-pick-player').addEventListener('click', async () => {
@@ -238,7 +246,7 @@ const StatsPanel = {
       if (result && result.players.length) {
         chosenPlayerId = result.players[0].id;
         this._dlg.querySelector('#shot-player-chosen').textContent = result.players[0].shortName || result.players[0].name;
-        await askAssistIfGoal();
+        await askPasser();
       }
     });
 
@@ -251,18 +259,15 @@ const StatsPanel = {
         btn.classList.add('selected');
         occ.meta.result = btn.dataset.result;
         this._dlg.querySelector('#shot-goal-zone-wrap').hidden = !(occ.meta.result === 'goal' || occ.meta.result === 'save');
-        this._dlg.querySelector('#shot-assist-wrap').hidden = occ.meta.result !== 'goal';
-        await askAssistIfGoal();
+        this._dlg.querySelector('#shot-passer-note').hidden = occ.meta.result !== 'goal';
+        await askPasser();
       });
     });
-    this._dlg.querySelector('#shot-pick-assist').addEventListener('click', async () => {
-      assistAsked = true;
+    this._dlg.querySelector('#shot-pick-passer').addEventListener('click', async () => {
+      passerAsked = true;
       const players = roster()[0].players.filter((p) => p.id !== chosenPlayerId);
-      const r = await PlayerPicker.open({ title: 'Assistência', groups: [{ label: roster()[0].label, players }], multi: false });
-      if (r && r.players.length) {
-        chosenAssistId = r.players[0].id;
-        this._dlg.querySelector('#shot-assist-chosen').textContent = r.players[0].shortName || r.players[0].name;
-      }
+      const r = await PlayerPicker.open({ title: 'Quem passou? (grande oportunidade criada)', groups: [{ label: roster()[0].label, players }], multi: false });
+      if (r && r.players.length) setPasser(r.players[0]);
     });
     this._dlg.querySelectorAll('.goal-zone-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -273,10 +278,12 @@ const StatsPanel = {
     });
 
     this._dlg.querySelector('#shot-done').addEventListener('click', async () => {
-      const ids = [chosenPlayerId, chosenAssistId].filter(Boolean);
+      const ids = [chosenPlayerId, chosenPasserId].filter(Boolean);
       if (ids.length) occ.playerIds = ids;
       if (chosenZone) occ.meta.goalZone = chosenZone;
-      if (chosenAssistId) occ.meta.assistId = chosenAssistId;
+      occ.meta.passerId = chosenPasserId;
+      // Num golo, o passe É a assistência: a mesma pessoa, duas leituras.
+      occ.meta.assistId = occ.meta.result === 'goal' ? chosenPasserId : null;
       if (occ.meta.result === 'goal') {
         // Fonte única do placar — um remate marcado "Golo" incrementa o resultado
         // diretamente; nunca cria um segundo registo de golo (ver matchStats.js).
@@ -506,15 +513,13 @@ const StatsPanel = {
       if (committedId) { occ.meta.committedById = committedId; ids.push(committedId); }
       if (sufferedId) { occ.meta.sufferedById = sufferedId; ids.push(sufferedId); }
       occ.playerIds = ids;
-      // Se houve cartão, fica registado no mesmo evento (nunca um segundo
-      // registo) e também na lista de cartões do jogo, para o relatório.
-      if (committedId && (conseq.has('yellow') || conseq.has('red'))) {
-        const p = this.live.findPlayerById(committedId);
-        const parts = { period: occ.period, minute: occ.minute };
-        this.live.match.cards.push({
-          id: Utils.uid('card'), playerId: committedId, player: p ? p.name : '',
-          color: conseq.has('red') ? 'red' : 'yellow', fromFoulId: occ.id, ...parts,
-        });
+      // O cartão fica no mesmo evento e em match.cards (é daí que saem os
+      // minutos jogados de um expulso). syncFoulCards é idempotente: reabrir o
+      // detalhe e voltar a gravar não duplica, e tirar o cartão retira-o.
+      const hadCard = (this.live.match.cards || []).some((c) => c.fromFoulId === occ.id);
+      if (hadCard || conseq.has('yellow') || conseq.has('red')) {
+        const p = committedId ? this.live.findPlayerById(committedId) : null;
+        MatchEffects.syncFoulCards(this.live.match, occ, p ? p.name : '');
         await AppState.persistMatch();
       }
       await AppState.updateOccurrence(occ);

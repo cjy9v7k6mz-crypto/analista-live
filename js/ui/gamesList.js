@@ -21,6 +21,10 @@ const GamesListScreen = {
             ⬆ Restaurar backup (JSON)
             <input type="file" id="file-restore" accept="application/json" hidden>
           </label>
+          <label class="btn btn-file">
+            ⬆ Importar um jogo (JSON)
+            <input type="file" id="file-import-match" accept="application/json" hidden>
+          </label>
         </div>
 
         <div class="games-list">
@@ -29,17 +33,78 @@ const GamesListScreen = {
       </div>
     `;
 
-    document.getElementById('btn-full-backup').addEventListener('click', async () => {
-      await ExportManager.exportFullBackup();
-      toast('Backup completo exportado');
+    document.getElementById('btn-full-backup').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await ExportManager.exportFullBackup();
+        toast(r.ok ? 'Backup completo exportado' : 'Backup cancelado — nada foi guardado');
+      } catch (err) {
+        console.error('Backup falhou:', err);
+        alert('Não foi possível criar o backup: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    document.getElementById('file-import-match').addEventListener('change', async (e) => {
+      const input = e.target;
+      const file = input.files[0];
+      input.value = '';
+      if (!file) return;
+      let data;
+      try {
+        data = await ExportManager.readMatchFile(file);
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+      const m = data.match;
+      const resumo = `${m.team} ${m.score?.team ?? 0} - ${m.score?.opponent ?? 0} ${m.opponent} · ${Utils.formatDate(m.date)} · ${(data.occurrences || []).length} registos`;
+      const existing = await DB.get(DB.STORES.matches, m.id);
+      let mode = 'copy';
+      if (existing) {
+        mode = confirm(`Este jogo já existe neste aparelho:\n${resumo}\n\nOK = substituir pelo do ficheiro\nCancelar = entrar como jogo novo (ficas com os dois)`) ? 'replace' : 'copy';
+      } else if (!confirm(`Importar este jogo?\n${resumo}`)) {
+        return;
+      }
+      try {
+        const r = await ExportManager.importMatch(data, mode);
+        const extras = [r.teamsAdded ? `${r.teamsAdded} equipa(s) nova(s)` : '', r.playersAdded ? `${r.playersAdded} jogador(es)` : ''].filter(Boolean);
+        toast(`Jogo importado · ${r.occurrences} registos${extras.length ? ' · ' + extras.join(' · ') : ''}`);
+        this.render(root);
+      } catch (err) {
+        console.error('Importação falhou:', err);
+        alert('Não foi possível importar: ' + err.message);
+      }
     });
     document.getElementById('file-restore').addEventListener('change', async (e) => {
-      const file = e.target.files[0];
+      const input = e.target;
+      const file = input.files[0];
+      // Limpa já a escolha: sem isto, voltar a escolher o MESMO ficheiro
+      // (ex.: depois de cancelar) não disparava outra vez o evento.
+      input.value = '';
       if (!file) return;
-      if (!confirm('Isto vai substituir todos os dados atuais pelos dados do ficheiro. Continuar?')) return;
-      await ExportManager.importFullBackup(file);
-      toast('Dados restaurados');
-      this.render(root);
+      let data;
+      try {
+        data = await ExportManager.readBackupFile(file);
+      } catch (err) {
+        alert(err.message);
+        return;
+      }
+      const when = data.exportedAt ? ` de ${Utils.formatDate(data.exportedAt)}` : '';
+      const nM = data.matches.length;
+      const nT = (data.teams || []).length;
+      const summary = `${nM} ${nM === 1 ? 'jogo' : 'jogos'}, ${nT} ${nT === 1 ? 'equipa' : 'equipas'}`;
+      if (!confirm(`Restaurar o backup${when} (${summary})?\n\nIsto substitui TODOS os dados atuais deste aparelho pelos do ficheiro.`)) return;
+      try {
+        await ExportManager.restoreBackup(data);
+        applyTheme();
+        toast('Dados restaurados');
+        this.render(root);
+      } catch (err) {
+        console.error('Restauro falhou:', err);
+        alert('Não foi possível restaurar: ' + err.message);
+      }
     });
 
     document.querySelectorAll('.game-row').forEach((row) => {

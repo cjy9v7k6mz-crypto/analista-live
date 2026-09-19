@@ -76,6 +76,10 @@ window.addEventListener('hashchange', router);
 
 async function boot() {
   await AppState.loadSettings();
+  // Pede ao browser para não limpar os dados quando falta espaço. Só pede
+  // sozinho com a app instalada — no Firefox de computador isto abria uma
+  // janela de permissão sem contexto. Nas Definições há o botão para pedir.
+  if (DataSafety.isStandalone()) DataSafety.requestPersistence();
   await AppState.loadLibrary();
   await Migrations.run();
   await SyncCore.init();

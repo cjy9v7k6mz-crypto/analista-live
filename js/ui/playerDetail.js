@@ -20,16 +20,17 @@ const PlayerDetailScreen = {
     const moments = events.filter((e) => e.source === 'momento');
     const interventions = events.filter((e) => e.source === 'banco');
     const cards = events.filter((e) => e.source === 'cartao');
-    // Um remate marcado "Golo" pode ter um segundo jogador tagged como
-    // assistência — esse remate não conta como remate/golo DELE, só a assistência.
-    const shots = events.filter((e) => e.source === 'remate' && e.meta?.assistId !== player.id);
+    // Um remate pode ter um segundo jogador tagged: quem fez o passe. Esse
+    // remate não conta como remate/golo DELE — conta como oportunidade criada.
+    const shots = events.filter((e) => e.source === 'remate' && MatchStats.passerOf(e) !== player.id);
+    const chancesCreated = allOccurrences.filter((o) => MatchStats.passerOf(o) === player.id).length;
     const shotsOnTarget = shots.filter((e) => e.meta?.result === 'goal' || e.meta?.result === 'save');
     // Golos = remates marcados "Golo" + golos do placar atribuídos a este jogador
     // (dois fluxos distintos, nunca o mesmo golo — ver PlayerStats).
     const goalCount = shots.filter((e) => e.meta?.result === 'goal').length
       + allOccurrences.filter((o) => o.source === 'golo' && o.meta?.scorerId === player.id).length;
     const assistCount = allOccurrences.filter((o) => o.source === 'golo' && o.meta?.assistId === player.id).length
-      + allOccurrences.filter((o) => o.source === 'remate' && o.meta?.result === 'goal' && o.meta?.assistId === player.id).length;
+      + allOccurrences.filter((o) => MatchStats.shotAssistOf(o) === player.id).length;
     const corners = events.filter((e) => e.source === 'canto');
     const foulsCommitted = events.filter((e) => e.source === 'falta' && e.meta?.committedById === player.id);
     const foulsSuffered = events.filter((e) => e.source === 'falta' && e.meta?.sufferedById === player.id);
@@ -57,7 +58,7 @@ const PlayerDetailScreen = {
         <header class="screen-header">
           <button class="icon-btn" data-nav="${backHash}" aria-label="Voltar">←</button>
           <h1>Ficha do Jogador</h1>
-          <span></span>
+          <button class="btn btn-small" id="btn-player-pdf" title="Ficha individual deste jogo em PDF">📄 Ficha PDF</button>
         </header>
 
         <div class="player-profile-head">
@@ -74,6 +75,7 @@ const PlayerDetailScreen = {
           ${statCard(negatives.length, 'Negativos', 'negative')}
           ${statCard(goalCount, 'Golos', 'positive')}
           ${statCard(assistCount, 'Assistências', assistCount ? 'positive' : '')}
+          ${statCard(chancesCreated, 'Grandes Oport. Criadas', chancesCreated ? 'positive' : '')}
           ${statCard(shots.length, 'Remates')}
           ${statCard(shotsOnTarget.length, 'Enquadrados')}
           ${statCard(corners.length, 'Cantos')}
@@ -119,6 +121,28 @@ const PlayerDetailScreen = {
         ${team ? `<button class="btn btn-block" data-nav="#/squad-stats/${team.id}">📈 Estatísticas deste jogador em todos os jogos</button>` : ''}
       </div>
     `;
+
+    // Ficha individual em PDF, só com este jogo.
+    document.getElementById('btn-player-pdf').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const opp = PlayerStats.sideOf(match, player.id, player.teamId) === 'opponent' ? match.team : match.opponent;
+        await PDFPlayer.generate({
+          player,
+          teamId: player.teamId,
+          team,
+          entries: [{ match, occurrences: allOccurrences }],
+          metricKey: 'minutes',
+          scopeLabel: `Jogo de ${Utils.formatDate(match.date)} vs ${opp}`,
+        });
+      } catch (err) {
+        console.error('Ficha PDF falhou:', err);
+        alert('Não foi possível gerar a ficha: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
   },
 };
 

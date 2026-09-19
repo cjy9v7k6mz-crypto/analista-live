@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Testes — Analista Live</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f1115; color: #e6e8ee; margin: 0; padding: 24px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .lead { color: #8a93a3; margin: 0 0 16px; font-size: 13px; }
+    #summary { font-size: 16px; margin: 0 0 20px; }
+    .ok { color: #3fc98a; } .ko { color: #e5555c; }
+    section { background: #171a21; border: 1px solid #262b35; border-radius: 10px; padding: 10px 16px; margin: 0 0 12px; }
+    section.suite-fail { border-color: #e5555c; }
+    h2 { font-size: 14px; margin: 6px 0; color: #a7b0c0; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { font-size: 13px; padding: 3px 0; }
+    li.fail { color: #ff9ca0; }
+    pre { background: #0b0d11; color: #e6e8ee; padding: 8px; border-radius: 6px; white-space: pre-wrap; font-size: 12px; margin: 4px 0 8px; }
+  </style>
+</head>
+<body>
+  <h1>Testes das contas</h1>
+  <p class="lead">Correm as funções reais da app com jogos inventados de valores conhecidos. Abrir num servidor local (ex.: <code>python3 -m http.server</code> na raiz do projeto) e ir a <code>/tests/</code>.</p>
+  <p id="summary">A correr…</p>
+  <div id="results"></div>
+
+  <!-- Só módulos puros (sem base de dados nem ecrã), pela ordem do index.html. -->
+  <script src="../js/data/defaultLibrary.js"></script>
+  <script src="../js/data/scoutingModel.js"></script>
+  <script src="../js/core/utils.js"></script>
+  <script src="../js/core/pitch.js"></script>
+  <script src="../js/core/lineupState.js"></script>
+  <script src="../js/core/matchStats.js"></script>
+  <script src="../js/core/playerStats.js"></script>
+  <script src="../js/core/matchEffects.js"></script>
+  <script src="../js/core/dataSafety.js"></script>
+  <script src="../js/core/seasonTrends.js"></script>
+  <script src="../js/core/playerReport.js"></script>
+  <script src="runner.js"></script>
+  <script src="specs.js"></script>
+  <script>TestRunner.run();</script>
+</body>
+</html>

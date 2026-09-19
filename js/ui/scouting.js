@@ -38,6 +38,11 @@ const ScoutingScreen = {
     this.matches = all
       .filter((m) => m.teams?.opponent?.teamId === this.team.id)
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    // O que cada item deu nos jogos terminados contra esta equipa — calculado ao
+    // abrir, nunca gravado no dossiê (não fica desatualizado nem duplicado).
+    const entries = [];
+    for (const m of this.matches) entries.push({ match: m, occurrences: await AppState.getOccurrences(m.id) });
+    this.trackRecord = MatchStats.scoutingTrackRecord(entries);
 
     root.innerHTML = `
       <div class="screen scouting-screen">
@@ -120,7 +125,7 @@ const ScoutingScreen = {
       try {
         const ownTeam = await AppState.getOwnTeam();
         await PDFScouting.generate(
-          { team: this.team, players: this.players, matches: this.matches, ownTeam },
+          { team: this.team, players: this.players, matches: this.matches, ownTeam, trackRecord: this.trackRecord },
           readConfig()
         );
         dlg.close();
@@ -766,6 +771,8 @@ const ScoutingScreen = {
   itemCardHTML(list, it) {
     const prio = SCOUTING_PRIORITIES.find((p) => p.key === it.priority);
     const players = (it.playerIds || []).map((id) => this.players.find((p) => p.id === id)).filter(Boolean);
+    const rec = this.trackRecord ? this.trackRecord.get(it.id) : null;
+    const trackLabel = MatchStats.trackRecordLabel(rec);
     return `
       <div class="sc-item accent-${list.accent}">
         <div class="sc-item-head">
@@ -780,6 +787,7 @@ const ScoutingScreen = {
         ${it.image ? `<figure class="sc-block-figure sc-item-figure"><img src="${it.image.thumb}" alt="" data-zoom-item="${it.id}" data-list="${list.id}" loading="lazy">${it.caption ? `<figcaption>${Utils.escapeHtml(it.caption)}</figcaption>` : ''}</figure>` : ''}
         <div class="sc-item-meta">
           ${prio ? `<span class="sc-badge">${prio.label}</span>` : ''}
+          ${trackLabel ? `<span class="sc-badge sc-badge-track" title="${rec.lastConfirmedDate ? `Última vez que aconteceu: ${Utils.formatDate(rec.lastConfirmedDate)}` : 'Esteve no plano, mas ainda não aconteceu em jogo'}">${Utils.escapeHtml(trackLabel)}</span>` : ''}
           ${it.category ? `<span class="sc-badge">${Utils.escapeHtml(it.category)}</span>` : ''}
           ${it.timeRef ? `<span class="sc-badge sc-badge-time">⏱ ${Utils.escapeHtml(it.timeRef)}</span>` : ''}
           ${players.map((p) => `<span class="sc-badge sc-badge-player">${p.number ? '#' + p.number + ' ' : ''}${Utils.escapeHtml(p.shortName || p.name)}</span>`).join('')}

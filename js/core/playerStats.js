@@ -17,6 +17,7 @@ const PlayerStats = {
     { key: 'minutes', label: 'Min', title: 'Minutos (aprox.)', p90: false },
     { key: 'goals', label: 'G', title: 'Golos', p90: true },
     { key: 'assists', label: 'A', title: 'Assistências', p90: true },
+    { key: 'chancesCreated', label: 'GOC', title: 'Grandes oportunidades criadas (passe que deu remate)', p90: true },
     { key: 'shots', label: 'Rem', title: 'Remates', p90: true },
     { key: 'shotsOnTarget', label: 'REmq', title: 'Remates enquadrados', p90: true },
     { key: 'saves', label: 'Def', title: 'Defesas (GR)', p90: true },
@@ -35,7 +36,7 @@ const PlayerStats = {
 
   _emptyMatchStats() {
     return {
-      goals: 0, assists: 0, shots: 0, shotsOnTarget: 0, saves: 0, corners: 0,
+      goals: 0, assists: 0, chancesCreated: 0, shots: 0, shotsOnTarget: 0, saves: 0, corners: 0,
       foulsCommitted: 0, foulsSuffered: 0, recuperacoes: 0, perdas: 0, yellow: 0, red: 0,
       positives: 0, negatives: 0, moments: 0, interventions: 0, events: 0,
     };
@@ -68,10 +69,11 @@ const PlayerStats = {
 
       switch (o.source) {
         case 'remate':
-          // Um remate marcado "Golo" pode ter dois jogadores tagged — quem
-          // rematou e quem assistiu. A assistência não conta como remate dela.
-          if (o.meta && o.meta.assistId === playerId) {
-            s.assists++;
+          // Um remate pode ter dois jogadores tagged — quem rematou e quem fez
+          // o passe. O passe não conta como remate de quem passou.
+          if (MatchStats.passerOf(o) === playerId) {
+            s.chancesCreated++;
+            if (MatchStats.shotAssistOf(o) === playerId) s.assists++;
             break;
           }
           s.shots++;

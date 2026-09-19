@@ -961,6 +961,8 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .sc-badge { font-size: 11px; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-dim); padding: 3px 8px; border-radius: 12px; }
 .sc-badge-time { color: var(--c-purple); border-color: var(--c-purple); }
 .sc-badge-player { color: var(--c-blue); border-color: var(--c-blue); }
+/* Histórico do item nos jogos ("Confirmado em 3 de 4 jogos"): texto em --text, que passa o contraste em todos os temas. */
+.sc-badge-track { color: var(--text); border-color: var(--border-strong); }
 .sc-tag { font-size: 11px; color: var(--c-green); background: var(--c-green-bg); padding: 3px 8px; border-radius: 12px; }
 
 .sc-kp-list { display: flex; flex-direction: column; gap: 12px; }
@@ -1425,3 +1427,110 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .coach-pin-sm.is-loss { background: var(--c-red); }
 .coach-pin-sm.is-recover { background: var(--c-green); }
 .coach-tmap-btn { margin-top: 4px; }
+
+/* ---------- Segurança dos dados (aviso de backup + Definições) ---------- */
+.banner-backup { background: var(--c-blue-bg); border-color: var(--c-blue); }
+.banner-backup .banner-detail { margin: 4px 0 0; font-size: 13px; color: var(--text-dim); }
+.banner-actions { display: flex; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
+@media (max-width: 640px) { .banner-backup { flex-direction: column; align-items: stretch; } }
+.data-safety { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 4px 14px; margin: 8px 0; }
+.data-safety .ds-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; font-size: 14px; }
+.data-safety .ds-row + .ds-row { border-top: 1px solid var(--border-strong); }
+.ds-ok { color: var(--c-green); }
+.ds-warn { color: var(--c-yellow); }
+.ds-muted { color: var(--text-mute); }
+
+/* ---------- 1ª parte vs 2ª parte ---------- */
+.pc-highlights { list-style: none; padding: 0; margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; }
+.pc-highlights li { background: var(--surface-2); border-left: 3px solid var(--c-blue); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px; }
+.pc-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pc-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 460px; }
+.pc-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-mute); font-weight: 600; padding: 6px 8px; text-align: center; white-space: nowrap; }
+.pc-table th.pc-team { color: var(--text-dim); border-bottom: 1px solid var(--border-strong); }
+.pc-table td { padding: 7px 8px; border-top: 1px solid var(--border-strong); }
+.pc-label { font-weight: 600; white-space: nowrap; }
+.pc-val { text-align: center; font-family: var(--font-mono); white-space: nowrap; }
+.pc-delta { font-size: 10px; color: var(--text-mute); margin-left: 4px; }
+
+/* ---------- Gráficos de evolução (TrendChart) ----------
+   Tokens próprios dos gráficos, apontados às cores da app e validados contra o
+   fundo de cada tema. Se um tema chumbar, corrige-se aqui o token desse tema. */
+:root {
+  --chart-series: var(--c-blue);
+  --chart-deemph: var(--text-mute);
+  --chart-grid: var(--border);
+  --chart-axis: var(--border-strong);
+  --chart-surface: var(--surface);
+}
+/* Validado (validate_palette.js, 2026-09-15): o azul do Graphite (#7aa2e8) fica
+   claro demais para fundo escuro (L 0,711 > 0,67) — usa-se o azul base (5,38:1).
+   No Claro o azul base dá só 3,05:1 no cartão e 2,75:1 na página — usa-se
+   #2a78d6 (4,42:1 no cartão, 3,98:1 na página). */
+html[data-theme="graphite"] { --chart-series: #5b93f0; }
+html[data-theme="light"] { --chart-series: #2a78d6; }
+.trend-figure { width: 100%; margin: 0; background: var(--chart-surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px 8px; min-width: 0; }
+.trend-title { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 4px; }
+.trend-plot { position: relative; width: 100%; }
+.trend-caption { margin: 4px 0 0; font-size: 11px; color: var(--text-dim); }
+.trend-empty { font-size: 12px; color: var(--text-dim); padding: 18px 0; margin: 0; }
+.tc-svg { display: block; overflow: visible; touch-action: pan-y; }
+.tc-svg:focus { outline: none; }
+.tc-svg:focus-visible { outline: 2px solid var(--c-blue); outline-offset: 2px; border-radius: 4px; }
+.tc-line { fill: none; stroke: var(--chart-series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.tc-dot, .tc-hover-dot { fill: var(--chart-series); stroke: var(--chart-surface); stroke-width: 2; }
+.tc-grid { stroke: var(--chart-grid); stroke-width: 1; }
+.tc-axis { stroke: var(--chart-axis); stroke-width: 1; }
+.tc-cross { stroke: var(--text-mute); stroke-width: 1; }
+/* Texto pequeno do gráfico usa --text-dim: --text-mute fica abaixo de 4,5:1 em todos os temas. */
+.tc-tick { fill: var(--text-dim); font-size: 10px; font-family: var(--font); font-variant-numeric: tabular-nums; }
+.tc-endlabel { fill: var(--text); font-size: 11px; font-weight: 700; font-family: var(--font); }
+.trend-tooltip { position: absolute; transform: translate(-50%, -100%); pointer-events: none; z-index: 5; display: flex; flex-direction: column; gap: 1px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+.trend-tooltip .tt-value { color: var(--text); font-size: 13px; }
+.trend-tooltip .tt-label { color: var(--text-dim); }
+.trend-tooltip .tt-sub { color: var(--text-dim); }
+.ss-spark { display: block; margin: 0 auto; }
+.tc-spark-line { fill: none; stroke: var(--chart-deemph); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.tc-spark-last { fill: var(--chart-series); }
+.ss-table .ss-col-spark { width: 84px; cursor: default; }
+.ss-trends { margin: 0 0 18px; }
+.ss-trends .section-title .muted { font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.ss-trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.ss-trend-note { margin: 0 0 14px; font-size: 12px; }
+.ss-trend-table { margin-top: 8px; }
+.ss-trend-table summary { cursor: pointer; font-size: 13px; color: var(--text-dim); padding: 6px 0; }
+.ss-table-plain { white-space: normal; }
+.ss-table-plain td:first-child { text-align: left; }
+.ss-table-plain thead th { cursor: default; }
+.ss-breakdown-trend { width: 100%; align-self: stretch; margin: 10px 0 14px; }
+.ss-metric-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ss-metric-chips .btn.active { border-color: var(--c-blue); background: var(--c-blue-bg); color: var(--text); }
+.ss-trend-verdict { margin: 6px 0 0; font-size: 13px; }
+
+/* ---------- Resumo da época e recorrências (hub do plantel) ---------- */
+.ss-season { margin: 0 0 16px; }
+.ss-season-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.ss-season-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.ss-season-card strong { font-size: 20px; font-family: var(--font-mono); }
+.ss-season-card span { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.ss-wdl { font-size: 12px; color: var(--text-mute); font-family: var(--font); margin: 0 2px 0 1px; }
+.ss-season-form strong { display: flex; gap: 4px; }
+.ss-form { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; font-size: 12px; font-weight: 800; font-family: var(--font); }
+.ss-form.is-V { background: var(--c-green-bg); color: var(--c-green); }
+.ss-form.is-E { background: var(--surface-2); color: var(--text-dim); }
+.ss-form.is-D { background: var(--c-red-bg); color: var(--c-red); }
+.ss-season-note { font-size: 11px; margin: 8px 0 0; }
+.ss-recurring { margin: 0 0 18px; }
+.ss-recurring .section-title .muted { font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.ss-rec-list { display: flex; flex-direction: column; gap: 6px; }
+.ss-rec-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; background: var(--surface-2);
+  border-left: 3px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px; }
+.ss-rec-row.type-negative { border-left-color: var(--c-red); }
+.ss-rec-row.type-positive { border-left-color: var(--c-green); }
+.ss-rec-name { font-weight: 600; }
+.ss-rec-games { color: var(--text-dim); font-size: 12px; white-space: nowrap; }
+.ss-rec-total { font-family: var(--font-mono); color: var(--text-dim); }
+
+/* ---------- Mudanças táticas (pós-jogo) ---------- */
+.pg-tactics { display: flex; flex-direction: column; gap: 6px; }
+.pg-tactic-row { display: flex; gap: 10px; align-items: baseline; background: var(--surface-2); border-radius: var(--radius-sm); padding: 8px 12px; font-size: 13px; }

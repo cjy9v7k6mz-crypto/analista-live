@@ -8,6 +8,11 @@ const DashboardScreen = {
     matches.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     const last = matches[0];
     const inProgress = matches.find((m) => m.status === 'in_progress');
+    const teams = await DB.getAll(DB.STORES.teams);
+    const st = window.AppState.settings || {};
+    const reminderText = DataSafety.reminderText(DataSafety.backupReminder({
+      lastBackupAt: st.lastBackupAt, snoozeUntil: st.backupSnoozeUntil, matches, teams,
+    }));
 
     root.innerHTML = `
       <div class="screen dashboard">
@@ -28,6 +33,18 @@ const DashboardScreen = {
             <strong>Jogo em curso:</strong> ${Utils.escapeHtml(inProgress.team)} vs ${Utils.escapeHtml(inProgress.opponent)}
           </div>
           <button class="btn btn-primary" data-nav="#/live/${inProgress.id}">Continuar jogo</button>
+        </div>` : ''}
+
+        ${reminderText ? `
+        <div class="banner banner-backup" id="backup-reminder">
+          <div>
+            <strong>💾 ${Utils.escapeHtml(reminderText.title)}</strong>
+            <p class="banner-detail">${Utils.escapeHtml(reminderText.detail)}</p>
+          </div>
+          <div class="banner-actions">
+            <button class="btn" id="backup-snooze">Mais tarde</button>
+            <button class="btn btn-primary" id="backup-now">Fazer backup</button>
+          </div>
         </div>` : ''}
 
         <div class="dash-grid">
@@ -87,6 +104,37 @@ const DashboardScreen = {
         </div>`}
       </div>
     `;
+
+    this.bindBackupReminder();
+  },
+
+  /** Aviso de backup: um toque faz o backup; "Mais tarde" adia uns dias. */
+  bindBackupReminder() {
+    const banner = document.getElementById('backup-reminder');
+    if (!banner) return;
+    document.getElementById('backup-now').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      try {
+        const r = await ExportManager.exportFullBackup();
+        if (r.ok) {
+          banner.remove();
+          toast('Backup completo exportado');
+        } else {
+          toast('Backup cancelado — nada foi guardado');
+        }
+      } catch (err) {
+        console.error('Backup falhou:', err);
+        alert('Não foi possível criar o backup: ' + err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+    document.getElementById('backup-snooze').addEventListener('click', async () => {
+      await AppState.saveSettings({ backupSnoozeUntil: Date.now() + DataSafety.SNOOZE_DAYS * DataSafety.DAY_MS });
+      banner.remove();
+      toast(`Volto a lembrar daqui a ${DataSafety.SNOOZE_DAYS} dias`);
+    });
   },
 };
 
