@@ -94,7 +94,7 @@ const PDFBriefing = {
       keyPlayers.forEach((k) => {
         const p = (ctx.opponentPlayers || []).find((x) => x.id === k.playerId);
         if (!p) return;
-        R.text(S, `${p.number ? '#' + p.number + ' ' : ''}${p.name}${p.position ? ' — ' + p.position : ''}`, { bold: true, size: 11 });
+        R.text(S, `${p.number ? '#' + p.number + ' ' : ''}${p.name}${p.position ? ' - ' + p.position : ''}`, { bold: true, size: 11 });
         const filled = KEY_PLAYER_FIELDS.filter((f) => k[f.key] && String(k[f.key]).trim()).slice(0, 3);
         if (filled.length) R.table(S, ['Aspeto', 'Nota'], filled.map((f) => [f.label, k[f.key]]), [0.3, 0.7]);
         else note('Sem notas.');

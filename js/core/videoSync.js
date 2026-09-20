@@ -40,6 +40,46 @@ const VideoSync = {
     return `${h ? h + ':' : ''}${mm}:${String(s).padStart(2, '0')}`;
   },
 
+  /** O que se pode levar para o vídeo. `focos` é o que vem escolhido de origem. */
+  SOURCES: [
+    { key: 'focos', label: 'Focos do plano' },
+    { key: 'golos', label: 'Golos' },
+    { key: 'remates', label: 'Remates' },
+    { key: 'perdasCaras', label: 'Perdas que custaram golo' },
+    { key: 'momentos', label: 'Momentos' },
+    { key: 'taticas', label: 'Mudanças táticas' },
+  ],
+  DEFAULT_SOURCES: ['focos'],
+
+  /**
+   * Registos a levar para o vídeo, segundo as fontes escolhidas. Sem repetidos:
+   * um remate marcado "Golo" entra uma vez, mesmo com "Golos" e "Remates" ligados.
+   */
+  selectOccurrences(match, occurrences, sources = this.DEFAULT_SOURCES) {
+    const set = new Set(sources && sources.length ? sources : this.DEFAULT_SOURCES);
+    const chosen = new Map();
+    const add = (o) => { if (o) chosen.set(o.id, o); };
+    if (set.has('focos')) this.focusOccurrences(match, occurrences).forEach(add);
+    if (set.has('golos')) occurrences.filter((o) => o.source === 'golo' || (o.source === 'remate' && o.meta?.result === 'goal')).forEach(add);
+    if (set.has('remates')) occurrences.filter((o) => o.source === 'remate').forEach(add);
+    if (set.has('perdasCaras')) MatchStats.costlyLosses(occurrences, match).items.forEach((it) => add(it.loss));
+    if (set.has('momentos')) occurrences.filter((o) => o.source === 'momento').forEach(add);
+    if (set.has('taticas')) occurrences.filter((o) => o.source === 'tatica').forEach(add);
+    return [...chosen.values()].sort((a, b) => a.timestamp - b.timestamp);
+  },
+
+  /**
+   * O registo envolve este jogador? Conta quem está tagged e também os papéis
+   * guardados no detalhe (marcador, passador, quem cometeu/sofreu a falta...).
+   */
+  involvesPlayer(occ, playerId) {
+    if (!playerId) return true;
+    if ((occ.playerIds || []).includes(playerId)) return true;
+    const m = occ.meta || {};
+    return [m.scorerId, m.assistId, m.passerId, m.ownPlayerId, m.oppPlayerId, m.committedById, m.sufferedById, m.keeperId]
+      .some((id) => id && id === playerId);
+  },
+
   /** Registos ligados a um foco do plano de observação. */
   focusOccurrences(match, occurrences) {
     const focusIds = new Set((match.observationPlan || []).filter((e) => e.isFocus).map((e) => e.id));
@@ -51,13 +91,14 @@ const VideoSync = {
 
   /**
    * Converte os registos escolhidos em clips com tempo de vídeo.
-   * @param {{match, occurrences, anchors, preRoll, postRoll, nameOf}} args
+   * @param {{match, occurrences, anchors, preRoll, postRoll, nameOf, sources, playerId}} args
    *   `anchors`: { '1T': { occurrenceId, videoSeconds }, ... }
+   *   `playerId`: opcional — só os registos que envolvem esse jogador.
    * @returns {{clips: Array, missing: Array}} `missing` = partes sem âncora,
    *   devolvidas à parte em vez de receberem tempos inventados.
    */
-  buildClips({ match, occurrences, anchors = {}, preRoll = this.DEFAULT_PRE_ROLL, postRoll = this.DEFAULT_POST_ROLL, nameOf = () => null }) {
-    const list = this.focusOccurrences(match, occurrences);
+  buildClips({ match, occurrences, anchors = {}, preRoll = this.DEFAULT_PRE_ROLL, postRoll = this.DEFAULT_POST_ROLL, nameOf = () => null, sources = this.DEFAULT_SOURCES, playerId = null }) {
+    const list = this.selectOccurrences(match, occurrences, sources).filter((o) => this.involvesPlayer(o, playerId));
     const byId = new Map(occurrences.map((o) => [o.id, o]));
     const clips = [];
     const missing = [];

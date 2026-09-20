@@ -52,17 +52,44 @@ create policy "sync_events_select_anon"
 -- Sem políticas de update/delete: ficam proibidos para o cliente anónimo.
 
 -- ---------------------------------------------------------------------
--- LIMPEZA AUTOMÁTICA (opcional mas recomendado)
+-- LIMPEZA AUTOMÁTICA (NÃO é opcional — corre estas três linhas)
 -- ---------------------------------------------------------------------
 -- Os eventos só interessam durante e logo após o jogo; o arquivo verdadeiro
 -- está no IndexedDB do analista e nos backups JSON. Apagar o que é antigo
 -- mantém a base pequena e reduz a exposição dos dados.
+--
+-- PORQUE ESTÁ ISTO AQUI EM VEZ DE "opcional": esta tabela é append-only e sem
+-- limpeza cresce para sempre. Num projeto real chegou a 815 MB (2306 linhas,
+-- 96,95% de toda a base de dados, acima do limite de 500 MB do plano gratuito)
+-- porque numa versão antiga o `publishMatchState()` enviava o objeto `match`
+-- inteiro, com o `teamSnapshot` lá dentro: logótipos e a foto de cada jogador
+-- dos dois planteis em base64, a cada golo, cartão e substituição. Eram ~1,3 MB
+-- por linha. Hoje o `SyncCore.lightMatch()` retira o `teamSnapshot` e cada
+-- linha pesa ~1,9 KB (≈1 MB por dia de jogo) — mas o que já lá está nunca sai
+-- sozinho.
 create or replace function public.purge_old_sync_events()
 returns void
 language sql
 as $$
-  delete from public.sync_events where created_at < now() - interval '7 days';
+  -- 2 dias chega: os eventos só servem durante o jogo e no imediato a seguir.
+  delete from public.sync_events where created_at < now() - interval '2 days';
 $$;
 
--- Para automatizar (requer a extensão pg_cron, disponível no Supabase):
--- select cron.schedule('purge-sync-events', '0 4 * * *', 'select public.purge_old_sync_events()');
+-- Automatização (a extensão pg_cron vem disponível no Supabase):
+create extension if not exists pg_cron;
+select cron.schedule('purge-sync-events', '0 4 * * *', 'select public.purge_old_sync_events()');
+
+-- Confirmar que ficou agendado:
+--   select jobname, active, schedule from cron.job;
+--
+-- Se a tabela já estiver enorme, apagar linhas NÃO devolve o espaço (o
+-- Postgres não encolhe o ficheiro). Fora de um jogo:
+--   truncate table public.sync_events;        -- instantâneo, liberta tudo
+-- ou, para guardar os últimos dias:
+--   delete from public.sync_events where created_at < now() - interval '2 days';
+--   vacuum full public.sync_events;           -- tranca a tabela uns segundos
+--
+-- Nada disto perde dados da Analista Live: esta tabela é só o canal de entrega
+-- entre o iPad do analista e o do banco. O único efeito é que um dispositivo
+-- que entre a meio de um jogo deixa de recuperar o histórico anterior — e o
+-- analista resolve isso reenviando o estado.

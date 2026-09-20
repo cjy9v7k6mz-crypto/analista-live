@@ -601,8 +601,13 @@ const MatchStats = {
         shotPct: base.length ? Math.round((baseWithShot / base.length) * 100) : 0,
         // Fora da zona = tem localização e não conta. Os sem localização ficam
         // só em `noLocation` — total = base + outOfZone + noLocation.
+        //
+        // Sem regra de zona (cantos), TODAS as jogadas entram na base: não há
+        // exclusões, e portanto não há "sem localização". Antes contavam-se na
+        // mesma os cantos sem coordenadas, e a identidade acima deixava de ser
+        // verdade (um canto podia aparecer na base E em noLocation).
         outOfZone: rows.filter((r) => !baseSet.has(r) && r.occ.meta?.location?.y != null).length,
-        noLocation: rows.filter((r) => r.occ.meta?.location?.y == null && !r.shots.length).length,
+        noLocation: inShootingZone ? rows.filter((r) => r.occ.meta?.location?.y == null && !r.shots.length).length : 0,
         rows,
       };
     };
@@ -906,6 +911,89 @@ const MatchStats = {
           <p class="muted pat-note">Só entram perdas com jogador identificado.</p>
         ` : '<p class="muted">Ainda não há perdas com jogador identificado.</p>'}
       </div>`;
+  },
+
+  /**
+   * Padrões em versão curta — linhas de uma linha, legíveis de pé em 2-3
+   * segundos. Mesmos números do bloco completo (`renderPatternsHTML`), sem
+   * tabelas: na coluna do banco não há largura para uma grelha.
+   *
+   * Só devolve linhas que têm dados — nada de "0 de 0" a ocupar espaço.
+   * @returns {Array<{icon,label,value,detail,tone}>}
+   */
+  patternHighlights(occurrences, match, nameOf = () => null) {
+    const chains = this.setPieceChains(occurrences);
+    const speed = this.transitionSpeed(occurrences);
+    const costly = this.costlyLosses(occurrences, match);
+    const thirds = this.transitionsByThird(occurrences, 'perda');
+    const rows = [];
+
+    const setPiece = (side, sideLabel) => {
+      const c = chains[side];
+      if (c.corners.total) {
+        rows.push({
+          icon: '⛳', label: `Cantos ${sideLabel}`,
+          value: `${c.corners.withShot}/${c.corners.total}`,
+          detail: c.corners.goals ? `${c.corners.shotPct}% com remate · ${c.corners.goals} golo${c.corners.goals === 1 ? '' : 's'}` : `${c.corners.shotPct}% com remate`,
+          tone: side === 'own' ? (c.corners.shotPct >= 40 ? 'good' : null) : (c.corners.shotPct >= 40 ? 'bad' : null),
+        });
+      }
+      if (c.freeKicks.base) {
+        rows.push({
+          icon: '🎯', label: `Livres ${sideLabel}`,
+          value: `${c.freeKicks.baseWithShot}/${c.freeKicks.base}`,
+          detail: `em zona de remate · ${c.freeKicks.shotPct}% com remate`,
+          tone: null,
+        });
+      }
+    };
+    setPiece('own', 'a favor');
+    setPiece('opponent', 'contra');
+
+    if (speed.recoveries) {
+      rows.push({
+        icon: '⚡', label: 'Recuperações com remate',
+        value: `${speed.converted}/${speed.recoveries}`,
+        detail: speed.medianSeconds != null
+          ? `${speed.pct}% · ${speed.medianSeconds}s até rematar`
+          : `${speed.pct}%`,
+        tone: speed.pct >= 25 ? 'good' : null,
+      });
+    }
+    if (costly.total) {
+      const who = costly.items.map((it) => it.playerId && nameOf(it.playerId)).filter(Boolean);
+      rows.push({
+        icon: '🩸', label: 'Perdas que deram golo',
+        value: String(costly.total),
+        detail: who.length ? who.slice(0, 3).join(', ') : `em ${this.CHAIN_WINDOW.costlyLoss}s`,
+        tone: 'bad',
+      });
+    }
+    if (thirds.total) {
+      const worst = [['def', 'terço defensivo'], ['mid', 'meio-campo'], ['att', 'terço ofensivo']]
+        .sort((a, b) => thirds[b[0]] - thirds[a[0]])[0];
+      rows.push({
+        icon: '📍', label: 'Onde se perde mais',
+        value: `${thirds[worst[0]]}/${thirds.total}`,
+        detail: `${worst[1]} · ${thirds[worst[0] + 'Pct']}% das perdas`,
+        tone: worst[0] === 'def' ? 'bad' : null,
+      });
+    }
+    return rows;
+  },
+
+  /** Bloco curto dos padrões (ecrã do banco). Vazio -> diz o que falta registar. */
+  renderPatternDigestHTML(occurrences, match, nameOf = () => null) {
+    const rows = this.patternHighlights(occurrences, match, nameOf);
+    if (!rows.length) {
+      return '<p class="muted pat-digest-empty">Os padrões aparecem aqui à medida que o analista registar cantos, livres, perdas e recuperações.</p>';
+    }
+    return `<div class="pat-digest">${rows.map((r) => `
+      <div class="pat-digest-row ${r.tone ? 'is-' + r.tone : ''}">
+        <span class="pat-digest-icon">${r.icon}</span>
+        <span class="pat-digest-label">${Utils.escapeHtml(r.label)}<small>${Utils.escapeHtml(r.detail || '')}</small></span>
+        <strong class="pat-digest-val">${Utils.escapeHtml(r.value)}</strong>
+      </div>`).join('')}</div>`;
   },
 
   /**

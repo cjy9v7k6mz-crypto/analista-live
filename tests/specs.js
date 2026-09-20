@@ -665,6 +665,27 @@ describe('VideoSync — levar os focos para o tempo do vídeo', () => {
     const r = VideoSync.buildClips({ match: m(), occurrences: list, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 3 } }, preRoll: 10 });
     eq(r.clips[0].start, 0);
   });
+  it('escolher fontes: focos, golos, remates, momentos — sem repetidos', () => {
+    const extra = [
+      occ({ id: 'g1', source: 'remate', period: '1T', minute: 30, timestamp: t0 + 1000, meta: { result: 'goal', passerId: 'B' } }),
+      occ({ id: 'm1', source: 'momento', period: '1T', minute: 35, timestamp: t0 + 2000 }),
+      occ({ id: 'x1', source: 'canto', period: '1T', minute: 40, timestamp: t0 + 3000 }),
+    ];
+    const all = [...list, ...extra];
+    eq(VideoSync.selectOccurrences(m(), all, ['focos']).map((o) => o.id), ['o1', 'o2', 'o4']);
+    eq(VideoSync.selectOccurrences(m(), all, ['momentos']).map((o) => o.id), ['m1']);
+    // "Golos" e "Remates" juntos não duplicam o mesmo remate-golo.
+    eq(VideoSync.selectOccurrences(m(), all, ['golos', 'remates']).map((o) => o.id), ['g1']);
+    eq(VideoSync.selectOccurrences(m(), all, []).map((o) => o.id), ['o1', 'o2', 'o4'], 'sem escolha, os focos');
+  });
+  it('filtrar por jogador apanha quem está tagged e os papéis do detalhe', () => {
+    const shot = occ({ id: 'g1', source: 'remate', period: '1T', minute: 30, timestamp: t0 + 1000, playerIds: ['A'], meta: { result: 'goal', passerId: 'B' } });
+    const all = [...list, shot];
+    const ids = (playerId) => VideoSync.buildClips({ match: m(), occurrences: all, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 600 } }, sources: ['focos', 'golos'], playerId }).clips.map((c) => c.id);
+    eq(ids('A'), ['o1', 'g1'], 'tagged no foco e rematador');
+    eq(ids('B'), ['g1'], 'só como passador');
+    eq(ids(null).length, 3, 'sem filtro');
+  });
   it('CSV e XML saem com o conteúdo certo e com escape', () => {
     const r = VideoSync.buildClips({ match: m(), occurrences: list, anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 600 } }, nameOf: () => 'J9 & cia' });
     const csv = VideoSync.toCSV(r.clips);
@@ -675,5 +696,422 @@ describe('VideoSync — levar os focos para o tempo do vídeo', () => {
     ok(xml.includes('J9 &amp; cia'), 'escape do &');
     ok(xml.includes('<start>592.0</start>'), xml);
     ok(VideoSync.toText(r.clips, m()).includes("10:00  Cantos ao 2º poste"), 'texto');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('MatchStats.patternHighlights — padrões em versão curta (banco)', () => {
+  const nameOf = (id) => ({ A: 'J6', B: 'J2' }[id] || null);
+  it('sem registos não inventa linhas', () => {
+    eq(MatchStats.patternHighlights([], match()).length, 0);
+  });
+  it('cantos: eficácia sobre o total e golos no detalhe', () => {
+    const corner = occ({ id: 'c1', source: 'canto', team: 'own' });
+    const corner2 = occ({ id: 'c2', source: 'canto', team: 'own' });
+    const shot = occ({ source: 'remate', team: 'own', meta: { fromCornerId: 'c1', result: 'goal' } });
+    const rows = MatchStats.patternHighlights([corner, corner2, shot], match());
+    const c = rows.find((r) => r.label === 'Cantos a favor');
+    eq([c.value, c.detail], ['1/2', '50% com remate · 1 golo']);
+  });
+  it('livres contam só a zona de remate (nem todo o livre tem remate)', () => {
+    // Falta do adversário no nosso terço ofensivo -> livre nosso em zona de remate.
+    const perto = occ({ source: 'falta', team: 'opponent', meta: { consequences: ['freeKick'], location: { x: 0.5, y: 0.2 } } });
+    const meioCampo = occ({ source: 'falta', team: 'opponent', meta: { consequences: ['freeKick'], location: { x: 0.5, y: 0.5 } } });
+    const rows = MatchStats.patternHighlights([perto, meioCampo], match());
+    const fk = rows.find((r) => r.label === 'Livres a favor');
+    eq(fk.value, '0/1', 'o recomeço a meio-campo não entra no denominador');
+  });
+  it('transição, perdas caras e zona de perda', () => {
+    const rec = occ({ source: 'recuperacao', team: 'own', minute: 10, second: 0, meta: { location: { x: 0.5, y: 0.5 } } });
+    const shot = occ({ source: 'remate', team: 'own', minute: 10, second: 12 });
+    const perda = occ({ source: 'perda', team: 'own', minute: 20, second: 0, meta: { location: { x: 0.5, y: 0.9 }, ownPlayerId: 'A' } });
+    const golo = occ({ source: 'golo', team: 'opponent', minute: 20, second: 10 });
+    const rows = MatchStats.patternHighlights([rec, shot, perda, golo], match(), nameOf);
+    const t = rows.find((r) => r.label === 'Recuperações com remate');
+    eq([t.value, t.detail], ['1/1', '100% · 12s até rematar']);
+    const cl = rows.find((r) => r.label === 'Perdas que deram golo');
+    eq([cl.value, cl.detail, cl.tone], ['1', 'J6', 'bad']);
+    const z = rows.find((r) => r.label === 'Onde se perde mais');
+    eq([z.value, z.detail], ['1/1', 'terço defensivo · 100% das perdas']);
+  });
+});
+
+describe('PlayerGrid — grelha de camisolas', () => {
+  const players = [
+    { id: 'a', number: 9, shortName: 'J9', name: 'Jogador 9', _onField: true },
+    { id: 'b', number: 7, shortName: 'J7', name: 'Jogador 7', _onField: true, _status: 'sub_in' },
+    { id: 'c', number: 14, shortName: 'J14', name: 'Jogador 14', _onField: false },
+  ];
+  it('desenha uma célula por jogador, mais a de "n/d"', () => {
+    const h = PlayerGrid.html({ id: 'g', players });
+    eq((h.match(/class="pg-cell/g) || []).length, 4);
+    ok(h.includes('data-pid="a"') && h.includes('data-pid="b"') && h.includes('data-pid="c"'), h);
+    ok(h.includes('pg-unknown'), 'a célula n/d existe');
+  });
+  it('banco a tracejado e quem entrou marcado', () => {
+    const h = PlayerGrid.html({ id: 'g', players });
+    ok(/data-pid="c"[\s\S]*?J14/.test(h), 'o banco aparece');
+    ok(h.includes('is-bench'), 'classe do banco');
+    ok(h.includes('is-sub-in'), 'classe de quem entrou');
+  });
+  it('marca o escolhido e exclui quem não pode ser escolhido', () => {
+    const h = PlayerGrid.html({ id: 'g', players, selectedId: 'b', exclude: ['a'] });
+    ok(!h.includes('data-pid="a"'), 'excluído não aparece');
+    ok(/data-pid="b"/.test(h) && h.includes('selected'), 'o escolhido fica marcado');
+  });
+  it('sem jogadores diz o que fazer em vez de ficar vazia', () => {
+    const h = PlayerGrid.html({ id: 'g', players: [] });
+    ok(h.includes('pg-empty') && h.includes('Equipas'), h);
+  });
+  it('sem número não parte a célula', () => {
+    const h = PlayerGrid.html({ id: 'g', players: [{ id: 'z', name: 'Sem número' }], unknown: false });
+    ok(h.includes('>·<'), h);
+    eq((h.match(/class="pg-cell/g) || []).length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('CrashGuard — o diário de falhas que o iPad não tem', () => {
+  const guardado = () => { const g = Object.create(CrashGuard); g.entries = []; g.KEY = 'teste_erros'; return g; };
+  it('sem falhas diz que não há', () => {
+    eq(CrashGuard.toText([]), 'Sem falhas registadas.');
+  });
+  it('escreve data, hora, sítio e mensagem', () => {
+    const t = new Date(2026, 8, 20, 15, 4).getTime();
+    const txt = CrashGuard.toText([{ at: t, kind: 'erro', message: 'x is not a function', where: 'live.js:12', hash: '#/live/g1', stack: 'at foo' }]);
+    ok(txt.includes('20/09/2026 15:04'), txt);
+    ok(txt.includes('live.js:12') && txt.includes('#/live/g1'), txt);
+    ok(txt.includes('x is not a function') && txt.includes('at foo'), txt);
+  });
+  it('guarda no máximo MAX falhas, a mais recente primeiro', () => {
+    const g = guardado();
+    for (let i = 0; i < CrashGuard.MAX + 5; i++) g.record('erro', 'falha ' + i, '', '', false);
+    eq(g.entries.length, CrashGuard.MAX);
+    eq(g.entries[0].message, 'falha ' + (CrashGuard.MAX + 4), 'a mais recente fica em primeiro');
+  });
+  it('corta mensagens e pilhas enormes em vez de encher o armazenamento', () => {
+    const g = guardado();
+    const e = g.record('erro', 'a'.repeat(5000), 'l1\nl2\nl3\nl4\nl5\nl6', '', false);
+    eq(e.message.length, 300);
+    eq(e.stack.split('\n').length, 4);
+  });
+  it('nunca deita a app abaixo, mesmo com lixo à entrada', () => {
+    const g = guardado();
+    ok(g.record('erro', null, undefined, undefined, false) !== null);
+    ok(typeof g.toText(g.entries) === 'string');
+  });
+});
+
+describe('DB — o que fazer quando a gravação falha', () => {
+  const erro = (name) => { const e = new Error('x'); e.name = name; return e; };
+  it('distingue o que vale a pena repetir do que não vale', () => {
+    eq(DB.isFatalWriteError(erro('QuotaExceededError')), true, 'disco cheio: repetir não resolve');
+    eq(DB.isFatalWriteError(erro('InvalidStateError')), true);
+    eq(DB.isFatalWriteError(erro('AbortError')), false, 'transação abortada: vale a pena repetir');
+    eq(DB.isFatalWriteError(erro('UnknownError')), false);
+  });
+  it('explica a falha em português, sem jargão', () => {
+    ok(DB.writeErrorText(erro('QuotaExceededError')).includes('espaço'), 'fala de espaço');
+    ok(DB.writeErrorText(erro('QuotaExceededError')).includes('não foi guardado'), 'diz que não guardou');
+    ok(DB.writeErrorText(erro('AbortError')).includes('AbortError'), 'no caso desconhecido, mostra o nome técnico');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TESTE DE FUMO — jogos gerados ao acaso.
+//
+// Os testes acima verificam casos que alguém se lembrou de escrever. Estes
+// verificam VERDADES QUE TÊM DE SE MANTER em qualquer jogo possível, sobre
+// dezenas de jogos inteiros gerados. Cada falha traz a semente: reproduzir é
+// só chamar MatchGen.match(semente).
+const SEMENTES = [1, 7, 13, 42, 99, 123, 404, 777, 1234, 2026, 31337, 60606];
+
+describe('Fumo: as contas do jogo aguentam qualquer jogo', () => {
+  it('nenhuma estatística fica negativa ou inválida', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const st = MatchStats.compute(m, occurrences);
+      ['own', 'opp'].forEach((lado) => {
+        MatchStats.STAT_KEYS.forEach((k) => {
+          const v = st[lado][k.key];
+          ok(Number.isFinite(v) && v >= 0, `semente ${semente}: ${lado}.${k.key} = ${v}`);
+        });
+      });
+    });
+  });
+
+  it('o placar bate certo com os registos de golo', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const conta = (chave) => occurrences.filter((o) => MatchEffects.scoreKeyOf(o) === chave).length;
+      eq([m.score.team, m.score.opponent], [conta('team'), conta('opponent')], `semente ${semente}`);
+      const st = MatchStats.compute(m, occurrences);
+      eq([st.own.goals, st.opp.goals], [m.score.team, m.score.opponent], `semente ${semente}: compute segue o placar`);
+    });
+  });
+
+  it('desfazer todos os golos devolve o jogo a 0-0, sem nunca passar a negativo', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const golos = occurrences.filter((o) => MatchEffects.scoreKeyOf(o));
+      golos.forEach((g) => {
+        MatchEffects.reverse(m, g);
+        ok(m.score.team >= 0 && m.score.opponent >= 0, `semente ${semente}: placar negativo`);
+      });
+      eq([m.score.team, m.score.opponent], [0, 0], `semente ${semente}`);
+    });
+  });
+
+  it('desfazer uma falta leva o cartão com ela', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const comCartao = occurrences.filter((o) => o.source === 'falta'
+        && (o.meta.consequences || []).some((c) => c === 'yellow' || c === 'red'));
+      comCartao.forEach((f) => {
+        MatchEffects.reverse(m, f);
+        eq((m.cards || []).filter((c) => c.fromFoulId === f.id).length, 0, `semente ${semente}: cartão órfão`);
+      });
+    });
+  });
+
+  it('os blocos de leitura nunca rebentam nem mostram NaN/undefined', () => {
+    const nomes = (id) => (id ? String(id).toUpperCase() : null);
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const saidas = [
+        MatchStats.renderPatternsHTML(occurrences, m, nomes),
+        MatchStats.renderPatternDigestHTML(occurrences, m, nomes),
+        MatchStats.renderScoutingCheckHTML(m, occurrences),
+        MatchStats.renderTransitionsMapHTML(occurrences, m.team, m.opponent, 'all', 'all', 90),
+        MatchStats.renderPeriodComparisonHTML(m, occurrences),
+        MatchStats.renderMapHTML('shots', occurrences, m.team, m.opponent, 'all'),
+        MatchStats.matchSummaryText(m, occurrences),
+      ];
+      saidas.forEach((html, i) => {
+        ok(typeof html === 'string' && html.length > 0, `semente ${semente}: saída ${i} vazia`);
+        ok(!/NaN|undefined|\[object Object\]/.test(html), `semente ${semente}: saída ${i} com lixo: ${(html.match(/.{0,40}(NaN|undefined|\[object Object\]).{0,40}/) || [])[0]}`);
+      });
+    });
+  });
+
+  it('percentagens ficam sempre entre 0 e 100', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const c = MatchStats.setPieceChains(occurrences);
+      [c.own.corners, c.own.freeKicks, c.opponent.corners, c.opponent.freeKicks].forEach((x) => {
+        ok(x.shotPct >= 0 && x.shotPct <= 100, `semente ${semente}: ${x.shotPct}%`);
+        eq(x.total, x.base + x.outOfZone + x.noLocation, `semente ${semente}: total = base + fora de zona + sem localização`);
+      });
+      const sp = MatchStats.transitionSpeed(occurrences);
+      ok(sp.pct >= 0 && sp.pct <= 100, `semente ${semente}`);
+      ok(sp.converted <= sp.recoveries, `semente ${semente}: mais conversões do que recuperações`);
+    });
+  });
+
+  it('os minutos de um jogador nunca passam a duração do jogo', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences, ownPlayers } = MatchGen.match(semente);
+      const fim = PlayerStats.matchEndMinute(m, occurrences);
+      ownPlayers.forEach((p) => {
+        const app = PlayerStats.appearance(m, p.id, 't1', occurrences);
+        ok(app.minutes >= 0 && app.minutes <= fim, `semente ${semente}: ${p.id} com ${app.minutes}′ de ${fim}′`);
+        if (!app.played) eq(app.minutes, 0, `semente ${semente}: quem não jogou tem 0′`);
+      });
+    });
+  });
+
+  it('o vídeo nunca inventa nem perde registos, nem gera tempos negativos', () => {
+    SEMENTES.forEach((semente) => {
+      const { match: m, occurrences } = MatchGen.match(semente);
+      const fontes = ['focos', 'golos', 'remates', 'perdasCaras', 'momentos', 'taticas'];
+      const escolhidas = VideoSync.selectOccurrences(m, occurrences, fontes);
+      const ancora = escolhidas.find((o) => o.period === '1T');
+      if (!ancora) return;
+      const r = VideoSync.buildClips({ match: m, occurrences, anchors: { '1T': { occurrenceId: ancora.id, videoSeconds: 600 } }, sources: fontes });
+      eq(r.clips.length + r.missing.length, escolhidas.length, `semente ${semente}: registos perdidos pelo caminho`);
+      r.clips.forEach((c) => {
+        ok(c.start >= 0 && c.end > c.start, `semente ${semente}: janela inválida ${c.start}-${c.end}`);
+        ok(Number.isFinite(c.videoSeconds), `semente ${semente}: tempo de vídeo inválido`);
+      });
+    });
+  });
+});
+
+describe('Fumo: a leitura de uma época inteira', () => {
+  const entradas = MatchGen.season(SEMENTES.slice(0, 8), { events: 60 })
+    .map(({ match: m, occurrences }) => ({ match: m, occurrences }));
+  const jogadores = MatchGen.players('t1', 'p');
+
+  it('a série de um jogador é null (e não 0) nos jogos em que não jogou', () => {
+    SeasonTrends.PLAYER_KEYS.forEach((k) => {
+      jogadores.forEach((p) => {
+        const serie = SeasonTrends.playerSeries(p.id, 't1', entradas, k.key);
+        serie.forEach((ponto) => {
+          ok(ponto.value === null || Number.isFinite(ponto.value), `${p.id}/${k.key}: ${ponto.value}`);
+        });
+      });
+    });
+  });
+
+  it('o agregado da época é coerente com os jogos', () => {
+    jogadores.forEach((p) => {
+      const agg = PlayerStats.aggregate(p.id, 't1', entradas);
+      ok(agg.apps <= entradas.length, `${p.id}: ${agg.apps} jogos em ${entradas.length}`);
+      ok(agg.starts <= agg.apps, `${p.id}: mais titularidades do que jogos`);
+      ok(agg.minutes >= 0 && Number.isFinite(agg.minutes), `${p.id}: ${agg.minutes}′`);
+      ok(agg.goals >= 0 && agg.assists >= 0, `${p.id}: negativos`);
+    });
+  });
+
+  it('a ficha individual gera-se sempre, com valores finitos', () => {
+    jogadores.slice(0, 4).forEach((p) => {
+      const sheet = PlayerReport.buildSheet({ player: p, teamId: 't1', entries: entradas, metricKey: 'minutes' });
+      ok(Array.isArray(sheet.rows), `${p.id}: sem linhas`);
+      Object.values(sheet.per90 || {}).forEach((v) => ok(v === null || Number.isFinite(Number(v)), `${p.id}: per90 inválido ${v}`));
+    });
+  });
+
+  it('o resumo da época não rebenta com jogos irregulares', () => {
+    const s = MatchStats.seasonSummary('t1', entradas);
+    ok(s && Number.isFinite(s.played), 'resumo sem jogos contados');
+    eq(s.wins + s.draws + s.losses, s.played, `${s.wins}+${s.draws}+${s.losses} != ${s.played}`);
+    ok(s.goalsFor >= 0 && s.goalsAgainst >= 0, 'golos negativos');
+    eq(s.form.length, s.played, 'a forma tem um resultado por jogo');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('SquadLoad — quem joga tudo e quem não sai do banco', () => {
+  const jogadores = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+  const jogo = (id, date, { titulares = ['a', 'b'], subs = ['c'], trocas = [] } = {}) => ({
+    match: match({ id, date, status: 'finished',
+      teams: { own: { teamId: 'T', starterIds: titulares, subIds: subs, positions: titulares.map((p) => ({ playerId: p })) }, opponent: {} },
+      substitutions: trocas }),
+    occurrences: [],
+  });
+  const entradas = [
+    jogo('m1', '2026-01-01'),
+    jogo('m2', '2026-01-08', { trocas: [{ side: 'own', outId: 'b', inId: 'c', minute: 60 }] }),
+    jogo('m3', '2026-01-15'),
+  ];
+
+  it('minutos, jogos, titularidades e percentagem de minutos possíveis', () => {
+    const linhas = SquadLoad.rows({ players: jogadores, teamId: 'T', entries: entradas });
+    const a = linhas.find((r) => r.playerId === 'a');
+    eq([a.apps, a.starts, a.minutes, a.sharePct], [3, 3, 270, 100], 'titular sempre');
+    const c = linhas.find((r) => r.playerId === 'c');
+    eq([c.apps, c.starts, c.minutes], [1, 0, 30], 'entrou aos 60 num jogo só');
+  });
+
+  it('conta os jogos seguidos sem entrar, a partir do fim', () => {
+    const linhas = SquadLoad.rows({ players: jogadores, teamId: 'T', entries: entradas });
+    eq(linhas.find((r) => r.playerId === 'c').benchStreak, 1, 'só o último jogo');
+    eq(linhas.find((r) => r.playerId === 'a').benchStreak, 0);
+  });
+
+  it('a data do último jogo em que jogou', () => {
+    const linhas = SquadLoad.rows({ players: jogadores, teamId: 'T', entries: entradas });
+    eq(linhas.find((r) => r.playerId === 'c').lastPlayedDate, '2026-01-08');
+  });
+
+  it('sinaliza sobrecarga, banco e quem nunca jogou', () => {
+    const linhas = SquadLoad.rows({ players: [...jogadores, { id: 'd' }], teamId: 'T', entries: entradas });
+    ok(linhas.find((r) => r.playerId === 'a').flags.includes('sobrecarga'), 'joga tudo');
+    ok(linhas.find((r) => r.playerId === 'd').flags.includes('nunca-jogou'));
+    ok(linhas.find((r) => r.playerId === 'd').flags.includes('sem-minutos'));
+  });
+
+  it('jogos por terminar e de outras equipas ficam de fora', () => {
+    const comLixo = [...entradas, { match: match({ id: 'x', date: '2026-02-01', status: 'live', teams: { own: { teamId: 'T', starterIds: ['a'], positions: [{ playerId: 'a' }] }, opponent: {} } }), occurrences: [] }];
+    eq(SquadLoad.rows({ players: jogadores, teamId: 'T', entries: comLixo })[0].matches, 3);
+  });
+
+  it('resumo: utilizados e concentração dos minutos', () => {
+    const linhas = SquadLoad.rows({ players: jogadores, teamId: 'T', entries: entradas });
+    const s = SquadLoad.summary(linhas);
+    eq([s.used, s.unused], [3, 0]);
+    eq(s.concentration, 100, 'com 3 jogadores, os "11 mais usados" são todos');
+  });
+});
+
+describe('ScoutingFeedback — o dossiê a aprender com os jogos', () => {
+  const item = (id, title, extra = {}) => ({ id, title, useAsFocus: false, priority: 'medium', ...extra });
+  const equipa = (itens) => ({ id: 'T2', name: 'Eles', scouting: { strengths: [], weaknesses: itens, threats: [], opportunities: [], triggers: [] } });
+  const jogo = (id, date, planEvents, occs = []) => ({
+    match: match({ id, date, status: 'finished', observationPlan: planEvents }),
+    occurrences: occs,
+  });
+  const pe = (id, itemId, nome) => ({ id, name: nome, scoutingRef: { list: 'weaknesses', itemId }, type: 'negative' });
+
+  it('confirmado em todos os jogos e ainda não é foco: propõe promover', () => {
+    const t = equipa([item('w1', 'Lateral sobe muito')]);
+    const entradas = [
+      jogo('m1', '2026-01-01', [pe('p1', 'w1', 'Lateral')], [occ({ planEventId: 'p1' })]),
+      jogo('m2', '2026-01-08', [pe('p2', 'w1', 'Lateral')], [occ({ planEventId: 'p2' })]),
+    ];
+    const s = ScoutingFeedback.suggestions(t, entradas);
+    eq(s.map((x) => x.kind), ['promote']);
+    ok(s[0].reason.includes('2 jogos'), s[0].reason);
+    eq(ScoutingFeedback.apply(t, s[0]), true);
+    eq(t.scouting.weaknesses[0].useAsFocus, true);
+  });
+
+  it('observado várias vezes e nunca aconteceu: propõe rever', () => {
+    const t = equipa([item('w1', 'Saída curta', { useAsFocus: true })]);
+    const entradas = [
+      jogo('m1', '2026-01-01', [pe('p1', 'w1', 'Saída')], []),
+      jogo('m2', '2026-01-08', [pe('p2', 'w1', 'Saída')], []),
+    ];
+    const s = ScoutingFeedback.suggestions(t, entradas);
+    eq(s.map((x) => x.kind), ['review']);
+    ok(/nunca aconteceu/.test(s[0].reason), s[0].reason);
+    ScoutingFeedback.apply(t, s[0]);
+    eq(t.scouting.weaknesses[0].useAsFocus, false, 'deixa de ser foco');
+  });
+
+  it('um só jogo não chega para opinar', () => {
+    const t = equipa([item('w1', 'X')]);
+    eq(ScoutingFeedback.suggestions(t, [jogo('m1', '2026-01-01', [pe('p1', 'w1', 'X')], [])]).length, 0);
+  });
+
+  it('padrões que se repetem e não estão no dossiê: propõe adicionar, na lista certa', () => {
+    const t = equipa([]);
+    const ev = (id, nome, type) => ({ id, name: nome, type, libraryId: 'lib1' });
+    const entradas = [
+      jogo('m1', '2026-01-01', [ev('a1', 'Cruzamentos do lado direito', 'negative')], [occ({ planEventId: 'a1' })]),
+      jogo('m2', '2026-01-08', [ev('a2', 'Cruzamentos do lado direito', 'negative')], [occ({ planEventId: 'a2' })]),
+    ];
+    const s = ScoutingFeedback.suggestions(t, entradas);
+    eq(s.map((x) => x.kind), ['add']);
+    eq(s[0].listId, 'strengths', 'um evento negativo nosso é um ponto forte deles');
+    ScoutingFeedback.apply(t, s[0]);
+    eq(t.scouting.strengths.length, 1);
+    eq(t.scouting.strengths[0].useAsFocus, true);
+  });
+
+  it('não propõe adicionar um evento que VEIO do dossiê, mesmo com outro nome no plano', () => {
+    // Regressão: o plano guarda "Lateral" e o dossiê "Lateral sobe muito". Comparar
+    // títulos não chega — é o scoutingRef que diz que já lá está.
+    const t = equipa([item('w1', 'Lateral sobe muito')]);
+    const entradas = [
+      jogo('m1', '2026-01-01', [pe('p1', 'w1', 'Lateral')], [occ({ planEventId: 'p1' })]),
+      jogo('m2', '2026-01-08', [pe('p2', 'w1', 'Lateral')], [occ({ planEventId: 'p2' })]),
+    ];
+    eq(ScoutingFeedback.suggestions(t, entradas).map((x) => x.kind), ['promote'], 'só a promoção, sem "adicionar"');
+  });
+
+  it('não propõe adicionar o que já está no dossiê (acentos e maiúsculas à parte)', () => {
+    const t = equipa([item('w1', 'Cruzamentos do lado direito')]);
+    const ev = (id, nome) => ({ id, name: nome, type: 'negative', libraryId: 'lib1' });
+    const entradas = [
+      jogo('m1', '2026-01-01', [ev('a1', 'CRUZAMENTOS DO LADO DIREITO')], [occ({ planEventId: 'a1' })]),
+      jogo('m2', '2026-01-08', [ev('a2', 'Cruzamentos do lado direito')], [occ({ planEventId: 'a2' })]),
+    ];
+    eq(ScoutingFeedback.suggestions(t, entradas).filter((x) => x.kind === 'add').length, 0);
+  });
+
+  it('equipa sem dossiê não rebenta', () => {
+    eq(ScoutingFeedback.suggestions(null, []).length, 0);
+    eq(ScoutingFeedback.suggestions({ name: 'X' }, []).length, 0);
   });
 });

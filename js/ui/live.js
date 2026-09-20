@@ -16,6 +16,13 @@ const LiveScreen = {
   teamPanelSide: null, // 'own' | 'opponent' | null (fechado)
 
   async render(root, params) {
+    // Registos que ficaram por gravar (disco cheio, por exemplo): última
+    // tentativa antes de mudar de jogo, para não irem à vida em silêncio.
+    if (this._unsaved && this._unsaved.length) {
+      await this.retryUnsaved(true);
+      this._unsaved = this._unsaved.filter((o) => o.matchId === params.matchId);
+      this.renderUnsavedBanner();
+    }
     this.match = await DB.get(DB.STORES.matches, params.matchId);
     if (!this.match) { window.location.hash = '#/dashboard'; return; }
     this.occurrences = await AppState.getOccurrences(this.match.id);
@@ -699,9 +706,9 @@ const LiveScreen = {
     const playerChips = players.length
       ? `<span class="history-players">${players.map((p) => `<span class="history-player-chip" data-open-player="${p.id}">${Utils.escapeHtml(p.shortName || p.name)}</span>`).join('')}</span>`
       : `<button class="history-add-player" data-tag-player="${o.id}" title="Adicionar jogador">+ jogador</button>`;
-    return `<div class="history-row source-${o.source}">
+    return `<div class="history-row source-${o.source} ${o._unsaved ? 'is-unsaved' : ''}">
       <span class="history-time">${t}</span>
-      <span class="history-label">${Utils.escapeHtml(o.eventName)}</span>
+      <span class="history-label">${o._unsaved ? '<span class="history-unsaved" title="Ainda não foi guardado no dispositivo">⚠️</span> ' : ''}${Utils.escapeHtml(o.eventName)}</span>
       ${playerChips}
     </div>`;
   },
@@ -801,13 +808,72 @@ const LiveScreen = {
       createdAt: Date.now(),
     };
     this.occurrences.push(occ);
-    await AppState.addOccurrence(occ);
-    await AppState.persistMatch();
+    // A gravação É verificada. Antes, uma falha do IndexedDB (disco cheio,
+    // transação abortada) rejeitava em silêncio: o evento aparecia no
+    // histórico, o analista seguia o jogo, e o registo nunca tinha existido.
+    try {
+      await AppState.addOccurrence(occ);
+      await AppState.persistMatch();
+      // Cada registo bem sucedido é também a oportunidade de recuperar os que
+      // falharam antes — sem obrigar o analista a carregar em nada.
+      if (this._unsaved && this._unsaved.length) this.retryUnsaved(true);
+    } catch (e) {
+      this.flagUnsaved(occ, e);
+    }
     // Sincronização silenciosa: entra na fila e segue. Se não houver rede,
     // fica pendente e é enviada sozinha mais tarde — o registo nunca espera.
     SyncCore.publish('occurrence', 'upsert', occ);
     Utils.vibrate(15);
     return occ;
+  },
+
+  // ---------- Registos por gravar ----------
+  // Ficam à vista até serem gravados. O princípio é simples: a app nunca pode
+  // dizer que guardou uma coisa que não guardou.
+  _unsaved: [],
+
+  flagUnsaved(occ, err) {
+    occ._unsaved = true;
+    if (!this._unsaved.includes(occ)) this._unsaved.push(occ);
+    CrashGuard.record('gravação', `${occ.eventName}: ${(err && err.name) || 'erro'}`, err && err.stack, 'recordOccurrence', false);
+    this._lastWriteError = err;
+    this.renderUnsavedBanner();
+    this.renderHistory();
+  },
+
+  async retryUnsaved(silent = false) {
+    const pending = [...this._unsaved];
+    if (!pending.length) return;
+    for (const occ of pending) {
+      try {
+        await AppState.addOccurrence(occ);
+        delete occ._unsaved;
+        this._unsaved = this._unsaved.filter((o) => o !== occ);
+      } catch (e) {
+        this._lastWriteError = e;
+        break; // se um falha, os seguintes falham pelo mesmo motivo
+      }
+    }
+    try { await AppState.persistMatch(); } catch (e) { /* já está sinalizado */ }
+    this.renderUnsavedBanner();
+    this.renderHistory();
+    if (!this._unsaved.length && !silent) toast('✅ Registos guardados');
+  },
+
+  renderUnsavedBanner() {
+    let el = document.getElementById('unsaved-banner');
+    const n = this._unsaved.length;
+    if (!n) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'unsaved-banner';
+      el.className = 'unsaved-banner';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = `
+      <span class="unsaved-banner-text">⚠️ ${n} ${n === 1 ? 'registo não foi guardado' : 'registos não foram guardados'}. ${Utils.escapeHtml(DB.writeErrorText(this._lastWriteError))}</span>
+      <button type="button" class="btn btn-tiny" id="unsaved-retry">Tentar guardar</button>`;
+    el.querySelector('#unsaved-retry').addEventListener('click', () => this.retryUnsaved());
   },
 
   /** Devolve o jogador (com a equipa a que pertence) a partir do seu ID, procurando em ambos os plantéis. */
@@ -1500,12 +1566,10 @@ const LiveScreen = {
         </div>
         <div id="goal-people">
           <p class="field-label" id="goal-scorer-label">Marcador</p>
-          <button class="btn btn-small" id="goal-pick-scorer">＋ Escolher jogador</button>
-          <span id="goal-scorer-name" class="muted"></span>
+          <div id="pg-scorer"></div>
           <div id="goal-assist-wrap">
-            <p class="field-label">Assistência</p>
-            <button class="btn btn-small" id="goal-pick-assist">＋ Escolher jogador</button>
-            <span id="goal-assist-name" class="muted"></span>
+            <p class="field-label">Assistência <span class="muted">(deixa em "n/d" se não houve)</span></p>
+            <div id="pg-assist"></div>
           </div>
         </div>
         <label class="field checkbox-field" style="margin-top:12px"><input type="checkbox" id="goal-moment"><span>⭐ Marcar como Momento importante</span></label>
@@ -1526,10 +1590,24 @@ const LiveScreen = {
     dlg.querySelector('#goal-close').addEventListener('click', closeOnly);
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); closeOnly(); });
 
-    const rosterFor = (s) => [{
-      label: s === 'own' ? this.match.team : this.match.opponent,
-      players: LineupState.annotatedRoster(this.match, s, s === 'own' ? this.ownPlayers : this.opponentPlayers),
-    }];
+    const rosterFor = (s) => LineupState.annotatedRoster(this.match, s, s === 'own' ? this.ownPlayers : this.opponentPlayers);
+
+    // Marcador e assistência lado a lado, sem abrir seletor. Num autogolo o
+    // marcador é da outra equipa e a assistência desaparece — as grelhas são
+    // redesenhadas quando o tipo de golo muda.
+    const paintPeople = () => {
+      const scorerSide = isOwnGoal ? (side === 'own' ? 'opponent' : 'own') : side;
+      PlayerGrid.render(dlg, { id: 'pg-scorer', players: rosterFor(scorerSide), selectedId: scorerId }, (id) => {
+        scorerId = id;
+        if (id && assistId === id) { assistId = null; }
+        paintAssist();
+      });
+      paintAssist();
+    };
+    // A assistência é sempre da MESMA equipa do golo e nunca o próprio marcador.
+    const paintAssist = () => PlayerGrid.render(dlg, {
+      id: 'pg-assist', players: rosterFor(side), selectedId: assistId, exclude: [scorerId].filter(Boolean),
+    }, (id) => { assistId = id; });
 
     dlg.querySelectorAll('[data-goal-type]').forEach((b) => b.addEventListener('click', () => {
       dlg.querySelectorAll('[data-goal-type]').forEach((x) => x.classList.remove('selected'));
@@ -1541,31 +1619,10 @@ const LiveScreen = {
         ? `Autogolo de (jogador d${side === 'own' ? 'o ' + this.match.opponent : 'a ' + this.match.team})`
         : 'Marcador';
       scorerId = null; assistId = null;
-      dlg.querySelector('#goal-scorer-name').textContent = '';
-      dlg.querySelector('#goal-assist-name').textContent = '';
+      paintPeople();
     }));
 
-    dlg.querySelector('#goal-pick-scorer').addEventListener('click', async () => {
-      const s = isOwnGoal ? (side === 'own' ? 'opponent' : 'own') : side;
-      const r = await PlayerPicker.open({ title: isOwnGoal ? 'Autogolo de' : 'Marcador', groups: rosterFor(s), multi: false });
-      if (r && r.players.length) {
-        scorerId = r.players[0].id;
-        dlg.querySelector('#goal-scorer-name').textContent = r.players[0].shortName || r.players[0].name;
-        // Assistência ativa: pergunta-se logo a seguir ao marcador, sem exigir
-        // outro toque à parte — só num autogolo é que não faz sentido.
-        if (!isOwnGoal && !assistId) {
-          const groups = rosterFor(side);
-          groups[0].players = groups[0].players.filter((p) => p.id !== scorerId);
-          const ra = await PlayerPicker.open({ title: 'Assistência (opcional)', groups, multi: false });
-          if (ra && ra.players.length) { assistId = ra.players[0].id; dlg.querySelector('#goal-assist-name').textContent = ra.players[0].shortName || ra.players[0].name; }
-        }
-      }
-    });
-    dlg.querySelector('#goal-pick-assist').addEventListener('click', async () => {
-      // A assistência é sempre da MESMA equipa do marcador.
-      const r = await PlayerPicker.open({ title: 'Assistência', groups: rosterFor(side), multi: false });
-      if (r && r.players.length) { assistId = r.players[0].id; dlg.querySelector('#goal-assist-name').textContent = r.players[0].shortName || r.players[0].name; }
-    });
+    paintPeople();
 
     dlg.querySelector('#goal-done').addEventListener('click', async () => {
       occ.meta.ownGoal = isOwnGoal;

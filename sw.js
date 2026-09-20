@@ -4,7 +4,7 @@
  * plano (stale-while-revalidate) para os ficheiros da aplicação.
  */
 
-const CACHE_VERSION = 'analista-live-v33';
+const CACHE_VERSION = 'analista-live-v34';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const ASSETS = [
   './js/data/formationPresets.js',
   './js/data/scoutingModel.js',
   './js/core/utils.js',
+  './js/core/crashGuard.js',
   './js/core/db.js',
   './js/core/imageUtils.js',
   './js/core/timer.js',
@@ -28,6 +29,8 @@ const ASSETS = [
   './js/core/dataSafety.js',
   './js/core/seasonTrends.js',
   './js/core/playerReport.js',
+  './js/core/squadLoad.js',
+  './js/core/scoutingFeedback.js',
   './js/core/videoSync.js',
   './js/sync/syncCore.js',
   './js/sync/transportLocal.js',
@@ -43,6 +46,7 @@ const ASSETS = [
   './js/ui/newGame.js',
   './js/ui/planBuilder.js',
   './js/ui/playerPicker.js',
+  './js/ui/playerGrid.js',
   './js/ui/lineupBuilder.js',
   './js/ui/statsPanel.js',
   './js/ui/sketchPad.js',
@@ -66,10 +70,24 @@ const ASSETS = [
   './icons/icon-maskable-512.png',
 ];
 
+// O "esqueleto" sem o qual a app não abre offline. Se um destes falhar, a
+// instalação TEM de falhar — é preferível manter a versão anterior em cache do
+// que instalar uma versão partida.
+const CORE = ['./', './index.html', './css/style.css', './js/app.js'];
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_VERSION).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_VERSION);
+    // Um a um, e não addAll: com addAll, um único ficheiro em falta na lista
+    // abortava a instalação inteira e a app ficava sem offline, sem aviso.
+    const falhados = [];
+    await Promise.all(ASSETS.map((url) =>
+      cache.add(url).catch(() => { falhados.push(url); })));
+    if (falhados.length) console.warn('SW: ficheiros não cacheados', falhados);
+    const coreFalhado = falhados.filter((f) => CORE.includes(f));
+    if (coreFalhado.length) throw new Error('SW: esqueleto em falta: ' + coreFalhado.join(', '));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {

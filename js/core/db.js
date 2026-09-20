@@ -31,6 +31,16 @@ function openDB() {
   _dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
 
+    // Outra janela da app está aberta com a versão antiga e bloqueia o upgrade.
+    // Sem isto o `open` nunca resolve NEM rejeita: a app ficava pendurada num
+    // ecrã em branco para sempre (PWA instalada + separador do Safari é o caso
+    // típico). Rejeitamos com uma mensagem que diz o que fazer.
+    req.onblocked = () => {
+      const err = new Error('A base de dados está a ser usada por outra janela da Analista Live. Fecha as outras janelas ou separadores da app e tenta de novo.');
+      err.name = 'BlockedError';
+      reject(err);
+    };
+
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
 
@@ -92,9 +102,19 @@ function openDB() {
       }
     };
 
-    req.onsuccess = (e) => resolve(e.target.result);
+    req.onsuccess = (e) => {
+      const db = e.target.result;
+      // Se outra janela pedir um upgrade mais tarde, temos de largar esta
+      // ligação — senão somos NÓS a bloquear essa janela.
+      db.onversionchange = () => { try { db.close(); } catch (err) { /* ignora */ } _dbPromise = null; };
+      resolve(db);
+    };
     req.onerror = (e) => reject(e.target.error);
   });
+  // Uma promessa rejeitada em cache envenenava tudo o que viesse a seguir: a
+  // app só voltava a funcionar depois de recarregar. Limpamos a cache para que
+  // a tentativa seguinte volte a abrir de raiz.
+  _dbPromise.catch(() => { _dbPromise = null; });
   return _dbPromise;
 }
 
@@ -112,6 +132,43 @@ const DB = {
       r.onsuccess = () => resolve(value);
       r.onerror = () => reject(r.error);
     });
+  },
+
+  /**
+   * Escrita com nova tentativa. Existe para o caminho crítico do LIVE: um erro
+   * transitório do IndexedDB (transação abortada, browser a arrumar espaço) não
+   * pode fazer desaparecer um registo de jogo.
+   *
+   * Não insiste em erros que a repetição não resolve (disco cheio, base
+   * fechada) — nesses casos falha já, para o ecrã poder avisar depressa.
+   */
+  async putRetry(storeName, value, tries = 3) {
+    let lastErr = null;
+    for (let i = 0; i < tries; i++) {
+      try {
+        return await this.put(storeName, value);
+      } catch (e) {
+        lastErr = e;
+        if (this.isFatalWriteError(e)) break;
+        await new Promise((r) => setTimeout(r, 120 * (i + 1)));
+      }
+    }
+    throw lastErr;
+  },
+
+  /** Erros em que repetir não serve de nada (e o utilizador tem de agir). */
+  isFatalWriteError(e) {
+    const n = e && e.name;
+    return n === 'QuotaExceededError' || n === 'InvalidStateError' || n === 'NotFoundError' || n === 'VersionError';
+  },
+
+  /** Mensagem em português para o que correu mal a gravar. */
+  writeErrorText(e) {
+    const n = e && e.name;
+    if (n === 'QuotaExceededError') return 'Não há espaço no dispositivo. Liberta espaço (ou exporta e apaga jogos antigos) — o registo não foi guardado.';
+    if (n === 'BlockedError') return e.message;
+    if (n === 'InvalidStateError') return 'A base de dados foi fechada pelo sistema. Fecha e volta a abrir a app.';
+    return `Falha ao guardar (${n || 'erro desconhecido'}).`;
   },
 
   async get(storeName, key) {

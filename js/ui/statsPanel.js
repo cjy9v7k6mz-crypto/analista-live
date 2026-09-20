@@ -149,6 +149,13 @@ const StatsPanel = {
     SyncCore.publish('occurrence', 'delete', { id: match.id });
   },
 
+  /** Plantel anotado (em campo primeiro) do lado pedido — base das grelhas. */
+  rosterFor(side) {
+    return side === 'own'
+      ? LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers)
+      : LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers);
+  },
+
   // ---------- Remate ----------
   openShotFlow() {
     this._dlg.innerHTML = `
@@ -192,9 +199,8 @@ const StatsPanel = {
           <button type="button" class="icon-btn" data-detail-back title="Voltar">✕</button>
         </div>
         <p class="muted">${String(occ.minute).padStart(2, '0')}' · ${side === 'own' ? Utils.escapeHtml(this.live.match.team) : Utils.escapeHtml(this.live.match.opponent)}</p>
-        <p class="field-label">Jogador</p>
-        <button class="btn btn-small" id="shot-pick-player">＋ Escolher jogador</button>
-        <span id="shot-player-chosen" class="muted"></span>
+        <p class="field-label">Quem rematou</p>
+        <div id="pg-shooter"></div>
         <p class="field-label">Origem do remate (toca no campo)</p>
         ${this.miniPitchHTML('shot-origin-pitch', 'shot-origin-dot', side)}
         <p class="field-label">Resultado</p>
@@ -206,9 +212,8 @@ const StatsPanel = {
           ${this.goalGraphicHTML('shot-goal-zone')}
         </div>
         <div id="shot-passer-wrap">
-          <p class="field-label">Quem passou <span class="muted">(grande oportunidade criada — deixa vazio se não houve passe)</span></p>
-          <button class="btn btn-small" id="shot-pick-passer">＋ Escolher jogador</button>
-          <span id="shot-passer-chosen" class="muted"></span>
+          <p class="field-label">Quem passou <span class="muted">(grande oportunidade criada — deixa em "n/d" se não houve passe)</span></p>
+          <div id="pg-passer"></div>
           <p class="muted" id="shot-passer-note" hidden>Como o remate foi golo, este passe conta também como assistência.</p>
         </div>
         <div class="dialog-actions">
@@ -217,38 +222,24 @@ const StatsPanel = {
       </div>
     `;
 
-    let chosenPlayerId = null;
-    // Quem passou: perguntado sozinho logo a seguir ao rematador — é daqui que
-    // saem as grandes oportunidades criadas. Nem todo o remate nasce de um passe
-    // (jogada individual, ressalto, livre direto), por isso "Desconhecido"
-    // resolve e o remate fica sem passador em vez de ter um inventado.
+    let chosenPlayerId = (occ.playerIds || [])[0] || null;
+    // Quem passou: é daqui que saem as grandes oportunidades criadas. Nem todo o
+    // remate nasce de um passe (jogada individual, ressalto, livre direto), por
+    // isso "n/d" resolve e o remate fica sem passador em vez de ter um inventado.
     let chosenPasserId = MatchStats.passerOf(occ);
-    let passerAsked = !!chosenPasserId;
-    const roster = () => side === 'own'
-      ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
-      : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
-    const setPasser = (p) => {
-      chosenPasserId = p ? p.id : chosenPasserId;
-      const el = this.live.findPlayerById(chosenPasserId);
-      this._dlg.querySelector('#shot-passer-chosen').textContent = el ? (el.shortName || el.name) : '';
-    };
-    setPasser(null);
-    const askPasser = async () => {
-      if (passerAsked) return;
-      passerAsked = true;
-      const players = roster()[0].players.filter((p) => p.id !== chosenPlayerId);
-      const r = await PlayerPicker.open({ title: 'Quem passou? (grande oportunidade criada)', groups: [{ label: roster()[0].label, players }], multi: false });
-      if (r && r.players.length) setPasser(r.players[0]);
-    };
-
-    this._dlg.querySelector('#shot-pick-player').addEventListener('click', async () => {
-      const result = await PlayerPicker.open({ title: 'Remate — jogador', groups: roster(), multi: false });
-      if (result && result.players.length) {
-        chosenPlayerId = result.players[0].id;
-        this._dlg.querySelector('#shot-player-chosen').textContent = result.players[0].shortName || result.players[0].name;
-        await askPasser();
-      }
+    const roster = () => this.rosterFor(side);
+    // O passador nunca é o próprio rematador — sai da grelha quando um é escolhido.
+    const paintPasser = () => PlayerGrid.render(this._dlg, {
+      id: 'pg-passer', players: roster(), selectedId: chosenPasserId, exclude: [chosenPlayerId].filter(Boolean),
+    }, (id) => { chosenPasserId = id; });
+    this._dlg.querySelector('#pg-shooter').outerHTML = PlayerGrid.html({ id: 'pg-shooter', players: roster(), selectedId: chosenPlayerId });
+    PlayerGrid.bind(this._dlg, 'pg-shooter', (id) => {
+      chosenPlayerId = id;
+      if (id && chosenPasserId === id) chosenPasserId = null;
+      paintPasser();
     });
+    this._dlg.querySelector('#pg-passer').outerHTML = PlayerGrid.html({ id: 'pg-passer', players: roster(), selectedId: chosenPasserId, exclude: [chosenPlayerId].filter(Boolean) });
+    PlayerGrid.bind(this._dlg, 'pg-passer', (id) => { chosenPasserId = id; });
 
     this.bindMiniPitch('#shot-origin-pitch', '#shot-origin-dot', (xy) => { occ.meta.origin = xy; });
 
@@ -260,14 +251,7 @@ const StatsPanel = {
         occ.meta.result = btn.dataset.result;
         this._dlg.querySelector('#shot-goal-zone-wrap').hidden = !(occ.meta.result === 'goal' || occ.meta.result === 'save');
         this._dlg.querySelector('#shot-passer-note').hidden = occ.meta.result !== 'goal';
-        await askPasser();
       });
-    });
-    this._dlg.querySelector('#shot-pick-passer').addEventListener('click', async () => {
-      passerAsked = true;
-      const players = roster()[0].players.filter((p) => p.id !== chosenPlayerId);
-      const r = await PlayerPicker.open({ title: 'Quem passou? (grande oportunidade criada)', groups: [{ label: roster()[0].label, players }], multi: false });
-      if (r && r.players.length) setPasser(r.players[0]);
     });
     this._dlg.querySelectorAll('.goal-zone-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -278,8 +262,7 @@ const StatsPanel = {
     });
 
     this._dlg.querySelector('#shot-done').addEventListener('click', async () => {
-      const ids = [chosenPlayerId, chosenPasserId].filter(Boolean);
-      if (ids.length) occ.playerIds = ids;
+      occ.playerIds = [chosenPlayerId, chosenPasserId].filter(Boolean);
       if (chosenZone) occ.meta.goalZone = chosenZone;
       occ.meta.passerId = chosenPasserId;
       // Num golo, o passe É a assistência: a mesma pessoa, duas leituras.
@@ -343,8 +326,7 @@ const StatsPanel = {
           <button class="btn result-btn" data-side="right">Direito</button>
         </div>
         <p class="field-label">Batedor</p>
-        <button class="btn btn-small" id="corner-pick-player">＋ Escolher jogador</button>
-        <span id="corner-player-chosen" class="muted"></span>
+        <div id="pg-corner"></div>
         <p class="field-label">Resultado</p>
         <div class="result-grid">
           ${MatchStats.CORNER_RESULTS.map((r) => `<button type="button" class="btn result-btn" data-result="${r.key}">${r.label}</button>`).join('')}
@@ -364,17 +346,9 @@ const StatsPanel = {
         occ.meta.side = btn.dataset.side;
       });
     });
-    let chosenPlayerId = null;
-    this._dlg.querySelector('#corner-pick-player').addEventListener('click', async () => {
-      const groups = side === 'own'
-        ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
-        : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
-      const result = await PlayerPicker.open({ title: 'Canto — batedor', groups, multi: false });
-      if (result && result.players.length) {
-        chosenPlayerId = result.players[0].id;
-        this._dlg.querySelector('#corner-player-chosen').textContent = result.players[0].shortName || result.players[0].name;
-      }
-    });
+    let chosenPlayerId = (occ.playerIds || [])[0] || null;
+    this._dlg.querySelector('#pg-corner').outerHTML = PlayerGrid.html({ id: 'pg-corner', players: this.rosterFor(side), selectedId: chosenPlayerId });
+    PlayerGrid.bind(this._dlg, 'pg-corner', (id) => { chosenPlayerId = id; });
     this._dlg.querySelectorAll('[data-result]').forEach((btn) => {
       btn.addEventListener('click', () => {
         this._dlg.querySelectorAll('[data-result]').forEach((b) => b.classList.remove('selected'));
@@ -387,12 +361,12 @@ const StatsPanel = {
       });
     });
     this._dlg.querySelector('#corner-chain-shot').addEventListener('click', async () => {
-      if (chosenPlayerId) occ.playerIds = [chosenPlayerId];
+      occ.playerIds = chosenPlayerId ? [chosenPlayerId] : [];
       await AppState.updateOccurrence(occ);
       this.registerShotQuick(side, { fromCornerId: occ.id });
     });
     this._dlg.querySelector('#corner-done').addEventListener('click', async () => {
-      if (chosenPlayerId) occ.playerIds = [chosenPlayerId];
+      occ.playerIds = chosenPlayerId ? [chosenPlayerId] : [];
       await AppState.updateOccurrence(occ);
       this.refreshLiveViews();
       toast('Canto atualizado');
@@ -448,12 +422,10 @@ const StatsPanel = {
         <div class="result-grid" id="foul-conseq">
           ${MatchStats.FOUL_CONSEQUENCES.map((c) => `<button type="button" class="btn result-btn" data-conseq="${c.key}">${c.label}</button>`).join('')}
         </div>
-        <p class="field-label">Quem cometeu</p>
-        <button class="btn btn-small" id="foul-pick-committed">＋ Escolher jogador</button>
-        <span id="foul-committed-chosen" class="muted"></span>
-        <p class="field-label">Quem sofreu</p>
-        <button class="btn btn-small" id="foul-pick-suffered">＋ Escolher jogador</button>
-        <span id="foul-suffered-chosen" class="muted"></span>
+        <p class="field-label">Quem cometeu <span class="muted">${side === 'own' ? Utils.escapeHtml(this.live.match.team) : Utils.escapeHtml(this.live.match.opponent)}</span></p>
+        <div id="pg-foul-committed"></div>
+        <p class="field-label">Quem sofreu <span class="muted">${otherSide === 'own' ? Utils.escapeHtml(this.live.match.team) : Utils.escapeHtml(this.live.match.opponent)}</span></p>
+        <div id="pg-foul-suffered"></div>
         <div id="foul-chain-wrap" hidden>
           <button type="button" class="btn btn-small btn-primary" id="foul-chain-shot">🎯 A falta resultou em remate — registar</button>
         </div>
@@ -470,28 +442,12 @@ const StatsPanel = {
         occ.meta.type = btn.dataset.type;
       });
     });
-    let committedId = null;
-    let sufferedId = null;
-    this._dlg.querySelector('#foul-pick-committed').addEventListener('click', async () => {
-      const groups = side === 'own'
-        ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
-        : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
-      const result = await PlayerPicker.open({ title: 'Quem cometeu a falta', groups, multi: false });
-      if (result && result.players.length) {
-        committedId = result.players[0].id;
-        this._dlg.querySelector('#foul-committed-chosen').textContent = result.players[0].shortName || result.players[0].name;
-      }
-    });
-    this._dlg.querySelector('#foul-pick-suffered').addEventListener('click', async () => {
-      const groups = otherSide === 'own'
-        ? [{ label: this.live.match.team, players: LineupState.annotatedRoster(this.live.match, 'own', this.live.ownPlayers) }]
-        : [{ label: this.live.match.opponent, players: LineupState.annotatedRoster(this.live.match, 'opponent', this.live.opponentPlayers) }];
-      const result = await PlayerPicker.open({ title: 'Quem sofreu a falta', groups, multi: false });
-      if (result && result.players.length) {
-        sufferedId = result.players[0].id;
-        this._dlg.querySelector('#foul-suffered-chosen').textContent = result.players[0].shortName || result.players[0].name;
-      }
-    });
+    let committedId = occ.meta?.committedById || null;
+    let sufferedId = occ.meta?.sufferedById || null;
+    this._dlg.querySelector('#pg-foul-committed').outerHTML = PlayerGrid.html({ id: 'pg-foul-committed', players: this.rosterFor(side), selectedId: committedId });
+    PlayerGrid.bind(this._dlg, 'pg-foul-committed', (id) => { committedId = id; });
+    this._dlg.querySelector('#pg-foul-suffered').outerHTML = PlayerGrid.html({ id: 'pg-foul-suffered', players: this.rosterFor(otherSide), selectedId: sufferedId });
+    PlayerGrid.bind(this._dlg, 'pg-foul-suffered', (id) => { sufferedId = id; });
     // Consequências são multi-seleção: uma falta pode dar livre + amarelo.
     const conseq = new Set();
     this._dlg.querySelectorAll('[data-conseq]').forEach((btn) => {
@@ -509,10 +465,11 @@ const StatsPanel = {
     // preenchido sem duplicar a lógica de cartões.
     const persistFoul = async () => {
       occ.meta.consequences = [...conseq];
-      const ids = [];
-      if (committedId) { occ.meta.committedById = committedId; ids.push(committedId); }
-      if (sufferedId) { occ.meta.sufferedById = sufferedId; ids.push(sufferedId); }
-      occ.playerIds = ids;
+      // Atribuição direta (não condicional): com a grelha, tirar um jogador que
+      // já estava escolhido tem de mesmo apagá-lo do registo.
+      occ.meta.committedById = committedId;
+      occ.meta.sufferedById = sufferedId;
+      occ.playerIds = [committedId, sufferedId].filter(Boolean);
       // O cartão fica no mesmo evento e em match.cards (é daí que saem os
       // minutos jogados de um expulso). syncFoulCards é idempotente: reabrir o
       // detalhe e voltar a gravar não duplica, e tirar o cartão retira-o.
@@ -584,8 +541,7 @@ const StatsPanel = {
         </div>
         <p class="muted">${String(occ.minute).padStart(2, '0')}' · ${side === 'own' ? Utils.escapeHtml(this.live.match.team) : Utils.escapeHtml(this.live.match.opponent)}</p>
         <p class="field-label">Guarda-redes</p>
-        <button class="btn btn-small" id="save-pick-gk">＋ Escolher jogador</button>
-        <span id="save-gk-name" class="muted"></span>
+        <div id="pg-keeper"></div>
         <p class="field-label">Tipo de defesa</p>
         <div class="result-grid">
           ${MatchStats.SAVE_TYPES.map((t) => `<button type="button" class="btn result-btn" data-savetype="${t.key}">${t.label}</button>`).join('')}
@@ -602,15 +558,9 @@ const StatsPanel = {
         </div>
       </div>`;
 
-    let keeperId = null, saveType = null, shotId = null;
-    this._dlg.querySelector('#save-pick-gk').addEventListener('click', async () => {
-      const groups = [{
-        label: side === 'own' ? this.live.match.team : this.live.match.opponent,
-        players: LineupState.annotatedRoster(this.live.match, side, side === 'own' ? this.live.ownPlayers : this.live.opponentPlayers),
-      }];
-      const r = await PlayerPicker.open({ title: 'Guarda-redes', groups, multi: false });
-      if (r && r.players.length) { keeperId = r.players[0].id; this._dlg.querySelector('#save-gk-name').textContent = r.players[0].shortName || r.players[0].name; }
-    });
+    let keeperId = occ.meta?.keeperId || (occ.playerIds || [])[0] || null, saveType = null, shotId = null;
+    this._dlg.querySelector('#pg-keeper').outerHTML = PlayerGrid.html({ id: 'pg-keeper', players: this.rosterFor(side), selectedId: keeperId });
+    PlayerGrid.bind(this._dlg, 'pg-keeper', (id) => { keeperId = id; });
     this._dlg.querySelectorAll('[data-savetype]').forEach((b) => b.addEventListener('click', () => {
       this._dlg.querySelectorAll('[data-savetype]').forEach((x) => x.classList.remove('selected'));
       b.classList.add('selected');

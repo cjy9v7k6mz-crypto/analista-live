@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Medição de escala — Analista Live</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0a0d13; color: #eef1f6; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: #a7b0c0; font-size: 13px; margin: 0 0 20px; max-width: 70ch; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; max-width: 760px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #262d3d; font-size: 14px; }
+  th { color: #707a8c; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  td.n { font-family: "SF Mono", Menlo, monospace; text-align: right; }
+  td.n.warn { color: #e3b23c; }
+  td.n.bad { color: #e5555c; font-weight: 700; }
+  .done { margin-top: 18px; color: #3fc98a; font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1>Medição de escala</h1>
+  <p class="sub">
+    Corre as contas da app sobre épocas inteiras geradas (10, 40 e 120 jogos, ~350 registos cada)
+    para ver o que acontece quando os dados crescem. Não toca na base de dados real — é tudo em
+    memória. Amarelo acima de 300 ms, vermelho acima de 1000 ms: um iPad é cerca de 3 a 4 vezes
+    mais lento do que um computador, por isso 300 ms aqui já é perto de um segundo lá.
+  </p>
+  <table id="out"><thead><tr><th>Operação</th><th>10 jogos</th><th>40 jogos</th><th>120 jogos</th></tr></thead><tbody></tbody></table>
+  <p class="done" id="done" hidden>Medição concluída.</p>
+
+  <script src="../js/data/defaultLibrary.js"></script>
+  <script src="../js/data/scoutingModel.js"></script>
+  <script src="../js/core/utils.js"></script>
+  <script src="../js/core/pitch.js"></script>
+  <script src="../js/core/lineupState.js"></script>
+  <script src="../js/core/matchStats.js"></script>
+  <script src="../js/core/playerStats.js"></script>
+  <script src="../js/core/matchEffects.js"></script>
+  <script src="../js/core/seasonTrends.js"></script>
+  <script src="../js/core/playerReport.js"></script>
+  <script src="../js/core/videoSync.js"></script>
+  <script src="generator.js"></script>
+  <script>
+    const ESCALAS = [10, 40, 120];
+    const tbody = document.querySelector('#out tbody');
+
+    const medir = (f) => { const t = performance.now(); f(); return Math.round(performance.now() - t); };
+    const linha = (nome, valores) => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${nome}</td>` + valores.map((v) =>
+        `<td class="n ${v > 1000 ? 'bad' : v > 300 ? 'warn' : ''}">${v} ms</td>`).join('');
+      tbody.appendChild(tr);
+    };
+
+    async function correr() {
+      const dados = {};
+      ESCALAS.forEach((n) => {
+        const sementes = [...Array(n)].map((_, i) => 1000 + i * 7);
+        dados[n] = MatchGen.season(sementes, { events: 350 }).map(({ match, occurrences }) => ({ match, occurrences }));
+      });
+      const jogadores = MatchGen.players('t1', 'p');
+      const nomeDe = (id) => String(id || '').toUpperCase();
+      await new Promise((r) => setTimeout(r, 10));
+
+      const provas = [
+        ['Estatísticas de um jogo (×n)', (e) => e.forEach(({ match, occurrences }) => MatchStats.compute(match, occurrences))],
+        ['Padrões do jogo (×n)', (e) => e.forEach(({ match, occurrences }) => MatchStats.renderPatternsHTML(occurrences, match, nomeDe))],
+        ['Agregado do plantel (16 jogadores)', (e) => jogadores.forEach((p) => PlayerStats.aggregate(p.id, 't1', e))],
+        ['Tendências da equipa', (e) => SeasonTrends.teamSeries('t1', e)],
+        ['Tendências de um jogador', (e) => SeasonTrends.playerSeries('p1', 't1', e, 'minutes')],
+        ['Ficha individual em PDF (dados)', (e) => PlayerReport.buildSheet({ player: jogadores[0], teamId: 't1', entries: e, metricKey: 'minutes' })],
+        ['Resumo da época', (e) => MatchStats.seasonSummary('t1', e)],
+        ['Eventos recorrentes', (e) => MatchStats.recurringPlanEvents(e)],
+      ];
+
+      for (const [nome, fn] of provas) {
+        linha(nome, ESCALAS.map((n) => medir(() => fn(dados[n]))));
+        await new Promise((r) => setTimeout(r, 0)); // deixa o ecrã pintar entre provas
+      }
+      document.getElementById('done').hidden = false;
+    }
+    correr();
+  </script>
+</body>
+</html>

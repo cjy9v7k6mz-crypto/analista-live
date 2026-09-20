@@ -607,6 +607,92 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
 .pp-card-name { font-size: 12px; font-weight: 600; text-align: center; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pp-actions { flex-wrap: wrap; }
 
+/* ---------- Grelha de camisolas (escolher jogador sem abrir nada) ---------- */
+/* flex: 0 0 auto é obrigatório: o .dialog-card é um flex column com scroll, e
+   um filho que rola por dentro encolhe até 0 de altura (a grelha desaparecia).
+   Sem scroll próprio — quem rola é o diálogo, como no resto dos detalhes. */
+.pg { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px;
+  flex: 0 0 auto; margin: 0 0 4px; }
+.pg-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  min-height: 48px; padding: 6px 2px; background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); color: var(--text); cursor: pointer;
+  transition: transform .08s, border-color .12s, background .12s; }
+.pg-cell:hover { background: var(--surface-hover); }
+.pg-cell:active { transform: scale(.95); }
+.pg-num { font-family: var(--font-mono); font-size: 18px; font-weight: 800; line-height: 1.05; }
+.pg-name { font-size: 10px; color: var(--text-dim); max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+/* Banco a tracejado: dá para o ver sem ler o rótulo, e continua a ser tocável. */
+.pg-cell.is-bench { background: var(--surface); border-style: dashed; }
+.pg-cell.is-bench .pg-num { color: var(--text-dim); }
+.pg-cell.is-sub-in { border-color: var(--c-green); border-style: solid; }
+.pg-cell.selected { background: var(--c-blue-bg); border-color: var(--c-blue); border-style: solid;
+  box-shadow: 0 0 0 1px var(--c-blue) inset; }
+.pg-cell.selected .pg-num, .pg-cell.selected .pg-name { color: var(--c-blue); }
+.pg-unknown { background: var(--surface); }
+.pg-nd { font-size: 12px; font-weight: 700; color: var(--text-dim); }
+.pg-empty { grid-column: 1 / -1; margin: 4px 0; font-size: 13px; }
+
+/* ---------- Rede de segurança: falhas visíveis ---------- */
+/* Discreta de propósito: a meio de um jogo, uma janela modal a pedir atenção
+   faz mais estragos do que o erro que está a comunicar. */
+.crash-bar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(140%);
+  background: var(--c-yellow-bg); color: var(--c-yellow); border: 1px solid var(--c-yellow);
+  padding: 10px 18px; border-radius: 24px; font-size: 13px; font-weight: 600; z-index: 998;
+  transition: transform .25s ease; max-width: 92vw; }
+.crash-bar.show { transform: translateX(-50%) translateY(0); }
+.crash-bar-link { background: none; border: none; color: inherit; text-decoration: underline;
+  font: inherit; cursor: pointer; padding: 0; }
+
+/* Esta NÃO se fecha sozinha: enquanto houver um registo por gravar, o analista
+   tem de o saber. */
+.unsaved-banner { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; background: var(--c-red-bg); color: var(--c-red);
+  border: 1px solid var(--c-red); padding: 10px 14px 10px 18px; border-radius: 24px;
+  font-size: 13px; font-weight: 600; z-index: 999; max-width: 94vw; box-shadow: 0 10px 30px rgba(0,0,0,.45); }
+.unsaved-banner-text { flex: 1; }
+.history-row.is-unsaved { border-left: 3px solid var(--c-red); }
+.history-unsaved { font-size: 12px; }
+
+/* ---------- Carga do plantel ---------- */
+.sl-block { margin: 18px 0; }
+.sl-intro { margin: 0 0 10px; }
+.sl-rows { display: flex; flex-direction: column; gap: 4px; }
+.sl-row { display: grid; grid-template-columns: minmax(90px, 1.4fr) minmax(60px, 3fr) 42px 52px 60px auto;
+  align-items: center; gap: 8px; padding: 5px 8px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 13px; }
+.sl-row.is-cold { opacity: .72; }
+.sl-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-bar { display: block; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.sl-bar-fill { display: block; height: 100%; background: var(--c-blue); }
+.sl-bar-fill.is-hot { background: var(--c-yellow); }
+.sl-pct, .sl-min { font-family: var(--font-mono); text-align: right; color: var(--text-dim); }
+.sl-apps { font-size: 11px; color: var(--text-mute); text-align: right; }
+.sl-flags { display: flex; gap: 3px; }
+.sl-flag { font-size: 13px; }
+@media (max-width: 620px) {
+  .sl-row { grid-template-columns: minmax(80px, 1.4fr) 1fr 42px auto; }
+  .sl-min, .sl-apps { display: none; }
+}
+
+/* ---------- O dossiê a aprender ---------- */
+.sf-block { margin: 18px 0; }
+.sf-row { display: flex; align-items: flex-start; gap: 10px; background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong); border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 6px; }
+.sf-row.kind-promote { border-left-color: var(--c-green); }
+.sf-row.kind-review { border-left-color: var(--c-yellow); }
+.sf-row.kind-demote { border-left-color: var(--text-mute); }
+.sf-row.kind-add { border-left-color: var(--c-blue); }
+.sf-icon { font-size: 15px; }
+.sf-text { flex: 1; }
+.sf-title { font-weight: 700; font-size: 14px; }
+.sf-reason { display: block; font-size: 12px; color: var(--text-mute); margin-top: 2px; line-height: 1.4; }
+.sf-row.is-done { opacity: .55; }
+
+.diag-log { max-height: 220px; overflow-y: auto; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px; font-family: var(--font-mono); font-size: 11px;
+  white-space: pre-wrap; word-break: break-word; color: var(--text-dim); margin: 0 0 8px; }
+
 /* ---------- Ficha do jogador ---------- */
 .player-profile-head { display: flex; align-items: center; gap: 16px; margin: 10px 0 18px; }
 .player-profile-head h2 { margin: 0; font-size: 20px; }
@@ -1129,11 +1215,35 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .coach-period.is-finished { color: var(--text-mute); }
 .coach-banner { background: var(--c-yellow-bg); color: var(--c-yellow); text-align: center; padding: 10px; font-weight: 700; }
 
-.coach-body { flex: 1; display: grid; grid-template-columns: 280px 1fr 300px; gap: 14px; padding: 14px 20px 20px; overflow: hidden; }
+.coach-body { flex: 1; display: grid; grid-template-columns: 300px 1fr 300px; gap: 14px; padding: 14px 20px 20px; overflow: hidden; }
+/* Coluna de leitura: os números rolam por dentro para os padrões ficarem
+   sempre à vista no fundo — nenhum dos dois esconde o outro. */
+.coach-stats { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.coach-stats-scroll { flex: 1 1 auto; min-height: 90px; overflow-y: auto; }
+.coach-momentum { flex: 0 0 auto; }
+.coach-patterns { flex: 0 0 auto; max-height: 44%; overflow-y: auto; }
 .coach-stats-table { width: 100%; border-collapse: collapse; }
-.coach-stats-table td { padding: 12px 4px; border-bottom: 1px solid var(--border); font-size: 17px; }
-.cs-own, .cs-opp { font-family: var(--font-mono); font-weight: 800; font-size: 22px; width: 26%; text-align: center; }
-.cs-label { text-align: center; color: var(--text-mute); font-size: 13px; }
+.coach-stats-table td { padding: 6px 4px; border-bottom: 1px solid var(--border); font-size: 15px; }
+.cs-own, .cs-opp { font-family: var(--font-mono); font-weight: 800; font-size: 17px; width: 26%; text-align: center; }
+.cs-label { text-align: center; color: var(--text-mute); font-size: 12px; }
+/* Tabela completa sem perder hierarquia: as principais grandes, as outras
+   compactas, e as que ainda estão a zero esbatidas (mas presentes). */
+.coach-stats-table tr.is-key td { padding: 11px 4px; }
+.coach-stats-table tr.is-key .cs-own, .coach-stats-table tr.is-key .cs-opp { font-size: 22px; }
+.coach-stats-table tr.is-key .cs-label { font-size: 13px; color: var(--text-dim); }
+.coach-stats-table tr.is-zero .cs-own, .coach-stats-table tr.is-zero .cs-opp { opacity: .45; }
+.coach-stats-table tr.cs-group td { border-top: 2px solid var(--border-strong); }
+.coach-patterns { margin-bottom: 4px; }
+.pat-digest { display: flex; flex-direction: column; gap: 5px; }
+.pat-digest-row { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 9px; }
+.pat-digest-row.is-good { border-left-color: var(--c-green); }
+.pat-digest-row.is-bad { border-left-color: var(--c-red); }
+.pat-digest-icon { font-size: 15px; }
+.pat-digest-label { flex: 1; font-size: 12px; font-weight: 700; line-height: 1.25; }
+.pat-digest-label small { display: block; font-weight: 400; font-size: 10px; color: var(--text-mute); }
+.pat-digest-val { font-family: var(--font-mono); font-size: 17px; font-weight: 800; }
+.pat-digest-empty { font-size: 12px; }
 
 .coach-feed-wrap { display: flex; flex-direction: column; overflow: hidden; }
 .coach-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -1172,6 +1282,8 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 @media (max-width: 1100px) {
   .coach-body { grid-template-columns: 1fr; overflow-y: auto; }
   .coach-score { font-size: 42px; }
+  /* Numa só coluna já rola o ecrã todo — os painéis deixam de rolar por dentro. */
+  .coach-stats, .coach-stats-scroll, .coach-patterns { overflow: visible; max-height: none; }
 }
 
 /* ---------- Modo Banco v1: campo, momentum, conversa, spotlight ---------- */
@@ -1240,7 +1352,6 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 
 /* ---------- Modo Banco v2: papéis, resumo de período, propor substituição ---------- */
 .coach-role-chip { background: var(--surface-2); }
-.coach-screen[data-role="principal"] .coach-stats-table { display: none; }
 .coach-screen[data-role="principal"] .coach-filters-time { display: none; }
 .coach-screen[data-role="principal"] .coach-pitch { max-width: 420px; }
 
@@ -1421,6 +1532,9 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .coach-pitch-filter { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-mute);
   border-radius: 16px; padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; opacity: .6; }
 .coach-pitch-filter.active { background: var(--surface); border-color: var(--border-strong); color: var(--text); opacity: 1; }
+.coach-pitch-filter b { font-family: var(--font-mono); font-weight: 800; }
+.coach-pitch-filter.is-empty b { opacity: .5; }
+.coach-pitch-time { margin-top: -2px; }
 
 /* Pins pequenos de perdas/recuperações no campo do banco */
 .coach-pin-sm { width: 6px; height: 6px; border-radius: 50%; font-size: 0; }
@@ -1547,3 +1661,10 @@ html[data-theme="light"] { --chart-series: #2a78d6; }
 .vs-missing { margin: 8px 0 0; font-size: 12px; color: var(--c-yellow); }
 .vs-note { margin: 8px 0 0; font-size: 11px; }
 @media (max-width: 640px) { .vs-anchor-row { grid-template-columns: 1fr; } }
+
+.vs-sources { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.vs-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: 16px; padding: 7px 12px; font-size: 13px; cursor: pointer; }
+.vs-chip input { accent-color: var(--c-blue); }
+.vs-chip:has(input:checked) { border-color: var(--c-blue); background: var(--c-blue-bg); }
+.vs-filter-note { margin: 0 0 8px; }

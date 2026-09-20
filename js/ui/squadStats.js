@@ -131,6 +131,7 @@ const SquadStatsScreen = {
     body.innerHTML = `
       ${this.seasonSummaryHTML(entries)}
       ${this.leadersHTML(rows)}
+      ${this.loadHTML(entries)}
       ${this.teamTrendsHTML(entries)}
       ${this.recurringHTML(entries)}
       <div class="ss-table-wrap">
@@ -240,6 +241,51 @@ const SquadStatsScreen = {
             </table>
           </div>
         </details>
+      </section>`;
+  },
+
+  /**
+   * Carga do plantel: quem joga tudo e quem não sai do banco. É a leitura que
+   * decide convocatórias — e a única aqui que não é sobre quem marca golos.
+   */
+  loadHTML(entries) {
+    const linhas = SquadLoad.rows({ players: this.players, teamId: this.teamId, entries });
+    if (!linhas.length || !linhas.some((r) => r.matches)) return '';
+    const resumo = SquadLoad.summary(linhas);
+    const nomeDe = (id) => {
+      const p = this.players.find((x) => x.id === id);
+      return p ? `${p.number ? '#' + p.number + ' ' : ''}${p.shortName || p.name}` : '—';
+    };
+    const marca = (f) => {
+      const l = SquadLoad.FLAG_LABELS[f];
+      return l ? `<span class="sl-flag is-${f}" title="${Utils.escapeHtml(l.text)}">${l.icon}</span>` : '';
+    };
+    return `
+      <section class="ss-block sl-block">
+        <h2 class="section-title">⚖️ Carga do plantel</h2>
+        <p class="muted sl-intro">
+          ${resumo.used} de ${linhas.length} jogadores utilizados em ${linhas[0].matches} jogo${linhas[0].matches === 1 ? '' : 's'}.
+          ${resumo.concentration}% dos minutos ficaram nos onze mais utilizados.
+          ${resumo.benched ? ` ${resumo.benched} sem entrar há 3 ou mais jogos.` : ''}
+        </p>
+        <div class="sl-rows">
+          ${linhas.map((r) => `
+            <div class="sl-row ${r.flags.includes('sem-minutos') || r.flags.includes('nunca-jogou') ? 'is-cold' : ''}">
+              <span class="sl-name">${Utils.escapeHtml(nomeDe(r.playerId))}</span>
+              <span class="sl-bar" title="${r.minutes}′ de ${r.possible}′ possíveis">
+                <span class="sl-bar-fill ${r.flags.includes('sobrecarga') ? 'is-hot' : ''}" style="width:${Math.min(100, r.sharePct)}%"></span>
+              </span>
+              <span class="sl-pct">${r.sharePct}%</span>
+              <span class="sl-min">${r.minutes}′</span>
+              <span class="sl-apps">${r.apps}J ${r.starts}T</span>
+              <span class="sl-flags">${r.flags.map(marca).join('')}</span>
+            </div>`).join('')}
+        </div>
+        <p class="muted pat-note">
+          Minutos aproximados, calculados pelo onze e pelas substituições. A percentagem é
+          sobre os minutos possíveis de quem esteve disponível o tempo todo — não distingue
+          lesões nem castigos, por isso serve para ver a distribuição, não para julgar.
+        </p>
       </section>`;
   },
 

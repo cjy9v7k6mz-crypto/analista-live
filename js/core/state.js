@@ -71,7 +71,10 @@ const AppState = {
   },
 
   async addOccurrence(occurrence) {
-    await DB.put(DB.STORES.occurrences, occurrence);
+    // putRetry e não put: no LIVE, um erro transitório do IndexedDB não pode
+    // fazer desaparecer um registo de jogo. Se falhar mesmo, propaga — quem
+    // chama tem de avisar o analista (ver LiveScreen.flagUnsaved).
+    await DB.putRetry(DB.STORES.occurrences, occurrence);
   },
 
   async getOccurrences(matchId) {

@@ -97,6 +97,17 @@ const PDFPlayer = {
       }
     }
 
+    // ---- Vídeo ----
+    if (sheet.video.length) {
+      R.h1(S, 'Vídeo - onde ver estes momentos', 60);
+      R.table(S, ['Jogo', 'Vídeo', 'Clip', 'O quê', 'Momento do jogo'], sheet.video.map((v) => [
+        `${v.date ? Utils.formatDate(v.date) : '-'} ${v.opponent || ''}`.trim(),
+        v.time, v.window, v.name + (v.note ? ` (${v.note})` : ''), v.gameLabel,
+      ]), [0.22, 0.12, 0.18, 0.32, 0.16]);
+      if (sheet.videoOmitted) note(`+ ${sheet.videoOmitted} não mostrados.`);
+      note('Tempos do vídeo desse jogo, calculados a partir da sincronização feita no pós-jogo.');
+    }
+
     // ---- Momentos e notas ----
     R.h1(S, 'Momentos e notas', 40);
     if (!sheet.highlights.length) {

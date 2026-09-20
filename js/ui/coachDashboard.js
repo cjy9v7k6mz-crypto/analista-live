@@ -19,6 +19,9 @@ const CoachDashboard = {
   timeFilter: 'all',    // all | last5 | last10 | 1T | 2T
   // O que aparece no campo ao vivo — cada camada liga/desliga independentemente.
   pitchLayers: { xi: true, shots: true, fouls: true, perdas: true, recuperacoes: true },
+  // Janela de tempo do campo. 'all' = TODO o jogo (é o filtro que manda no que
+  // aparece, não um recorte escondido no código).
+  pitchTime: 'all',      // all | 1T | 2T | last10 | last5
   timerTick: null,
   unsubscribe: [],
 
@@ -185,14 +188,19 @@ const CoachDashboard = {
 
         <div class="coach-body">
           <section class="coach-stats">
-            <table class="coach-stats-table" id="coach-stats-table">${this.statRows(st)}</table>
+            <div class="coach-stats-scroll">
+              <table class="coach-stats-table" id="coach-stats-table">${this.statRows(st)}</table>
+            </div>
             <div class="coach-momentum" id="coach-momentum"></div>
+            <h3 class="coach-side-title">🔗 Padrões do jogo</h3>
+            <div class="coach-patterns" id="coach-patterns"></div>
           </section>
 
           <section class="coach-centre">
-            <div class="coach-pitch-filters" id="coach-pitch-filters">
-              ${[['xi', '👥 Onze'], ['shots', '🎯 Remates'], ['fouls', '⚠️ Faltas'], ['perdas', '🔴 Perdas'], ['recuperacoes', '🟢 Recuperações']]
-                .map(([k, l]) => `<button class="coach-pitch-filter ${this.pitchLayers[k] ? 'active' : ''}" data-layer="${k}">${l}</button>`).join('')}
+            <div class="coach-pitch-filters" id="coach-pitch-filters">${this.pitchFilterChips()}</div>
+            <div class="coach-pitch-filters coach-pitch-time" id="coach-pitch-time">
+              ${[['all', 'Jogo todo'], ['1T', '1ª P'], ['2T', '2ª P'], ['last10', "Últ. 10'"], ['last5', "Últ. 5'"]]
+                .map(([k, l]) => `<button class="coach-pitch-filter ${this.pitchTime === k ? 'active' : ''}" data-ptime="${k}">${l}</button>`).join('')}
             </div>
             <div class="coach-pitch-wrap" id="coach-pitch"></div>
             <div class="coach-feed-wrap">
@@ -460,11 +468,29 @@ const CoachDashboard = {
     }).join('');
   },
 
+  /** As que o treinador lê primeiro — ficam em destaque, o resto fica compacto. */
+  KEY_STATS: ['goals', 'shots', 'shotsOnTarget', 'corners', 'foulsCommitted', 'yellowCards'],
+
+  /**
+   * Tabela completa: TODAS as estatísticas do jogo, não um subconjunto. As
+   * principais ficam em destaque e as que ainda estão a zero ficam esbatidas,
+   * para a totalidade não custar legibilidade.
+   */
   statRows(st) {
-    return ['goals', 'shots', 'shotsOnTarget', 'corners', 'foulsCommitted', 'yellowCards'].map((k) => {
-      const label = MatchStats.STAT_KEYS.find((x) => x.key === k)?.label || k;
-      return `<tr><td class="cs-own">${st.own[k]}</td><td class="cs-label">${label}</td><td class="cs-opp">${st.opp[k]}</td></tr>`;
-    }).join('');
+    const rows = MatchStats.STAT_KEYS.map((k) => {
+      const own = st.own[k.key] || 0;
+      const opp = st.opp[k.key] || 0;
+      const cls = [this.KEY_STATS.includes(k.key) ? 'is-key' : '', (!own && !opp) ? 'is-zero' : ''].join(' ').trim();
+      return `<tr class="${cls}"><td class="cs-own">${own}</td><td class="cs-label">${k.label}</td><td class="cs-opp">${opp}</td></tr>`;
+    });
+    // Perdas/recuperações são registadas sempre do nosso lado (team 'own'), mas
+    // a leitura espelhada é verdadeira pelo próprio modelo: uma perda nossa é
+    // uma recuperação deles, e vice-versa.
+    const perdas = this.occurrences.filter((o) => o.source === 'perda').length;
+    const recs = this.occurrences.filter((o) => o.source === 'recuperacao').length;
+    rows.push(`<tr class="cs-group ${(!perdas && !recs) ? 'is-zero' : ''}"><td class="cs-own">${perdas}</td><td class="cs-label">Perdas</td><td class="cs-opp">${recs}</td></tr>`);
+    rows.push(`<tr class="${(!perdas && !recs) ? 'is-zero' : ''}"><td class="cs-own">${recs}</td><td class="cs-label">Recuperações</td><td class="cs-opp">${perdas}</td></tr>`);
+    return rows.join('');
   },
 
   renderStats() {
@@ -473,7 +499,58 @@ const CoachDashboard = {
     t.innerHTML = this.statRows(MatchStats.compute(this.match, this.occurrences));
   },
 
+  /** Padrões em versão curta, sempre visíveis (o bloco completo fica no botão 🔗). */
+  renderPatterns() {
+    const box = document.getElementById('coach-patterns');
+    if (!box || !this.match) return;
+    box.innerHTML = MatchStats.renderPatternDigestHTML(this.occurrences, this.match, (id) => {
+      const p = this.players.find((x) => x.id === id);
+      return p ? (p.shortName || p.name) : null;
+    });
+  },
+
   // ---------- Campo ao vivo ----------
+  PITCH_TIME_LABELS: { all: 'todo o jogo', '1T': '1ª parte', '2T': '2ª parte', last10: "últ. 10'", last5: "últ. 5'" },
+
+  /**
+   * O que o campo pode desenhar: TODO o jogo, recortado apenas pelo filtro de
+   * tempo escolhido. Antes havia uma janela fixa de 12 minutos escondida no
+   * código — o mapa mentia sobre o que já tinha sido registado.
+   */
+  pitchOccurrences() {
+    const nowMin = this.currentMinute();
+    return this.occurrences.filter((o) => {
+      if (this.pitchTime === '1T') return o.period === '1T';
+      if (this.pitchTime === '2T') return o.period === '2T';
+      if (this.pitchTime === 'last10') return (o.minute ?? 0) >= nowMin - 10;
+      if (this.pitchTime === 'last5') return (o.minute ?? 0) >= nowMin - 5;
+      return true;
+    });
+  },
+
+  /** Camadas com a contagem do que existe na janela atual (0 = nada a mostrar). */
+  pitchFilterChips() {
+    const list = this.pitchOccurrences();
+    const n = (src, key) => list.filter((o) => o.source === src && o.meta?.[key]).length;
+    const counts = { xi: null, shots: n('remate', 'origin'), fouls: n('falta', 'location'), perdas: n('perda', 'location'), recuperacoes: n('recuperacao', 'location') };
+    return [['xi', '👥 Onze'], ['shots', '🎯 Remates'], ['fouls', '⚠️ Faltas'], ['perdas', '🔴 Perdas'], ['recuperacoes', '🟢 Recuperações']]
+      .map(([k, l]) => `<button class="coach-pitch-filter ${this.pitchLayers[k] ? 'active' : ''} ${counts[k] === 0 ? 'is-empty' : ''}" data-layer="${k}">${l}${counts[k] != null ? ` <b>${counts[k]}</b>` : ''}</button>`).join('');
+  },
+
+  renderPitchFilters() {
+    const box = document.getElementById('coach-pitch-filters');
+    if (!box) return;
+    box.innerHTML = this.pitchFilterChips();
+    box.querySelectorAll('[data-layer]').forEach((b) => b.addEventListener('click', () => this.toggleLayer(b.dataset.layer)));
+  },
+
+  toggleLayer(k) {
+    if (!(k in this.pitchLayers)) return;
+    this.pitchLayers[k] = !this.pitchLayers[k];
+    this.renderPitchFilters();
+    this.renderPitch();
+  },
+
   renderPitch() {
     const wrap = document.getElementById('coach-pitch');
     if (!wrap || !this.match) return;
@@ -495,11 +572,10 @@ const CoachDashboard = {
       }).join('');
     };
 
-    // Pins de remates / faltas / perdas / recuperações dos últimos ~12 min,
-    // cada camada ligada/desligada pelos filtros por cima do campo.
+    // Pins de remates / faltas / perdas / recuperações. Por omissão é o jogo
+    // todo — os filtros por cima do campo é que mandam no que aparece.
     const L = this.pitchLayers;
-    const nowMin = this.currentMinute();
-    const recent = this.occurrences.filter((o) => (o.minute ?? 0) >= nowMin - 12);
+    const recent = this.pitchOccurrences();
     const shotPins = !L.shots ? '' : recent.filter((o) => o.source === 'remate' && o.meta?.origin).map((o) => {
       const xy = o.meta.origin;
       const isGoal = o.meta?.result === 'goal';
@@ -534,7 +610,7 @@ const CoachDashboard = {
       <div class="coach-pitch-legend">
         <span><b class="dot own"></b> ${Utils.escapeHtml(this.match.team)} <span class="muted">↑</span></span>
         <span><b class="dot opp"></b> ${Utils.escapeHtml(this.match.opponent)} <span class="muted">↓</span></span>
-        <span class="muted">★ golo · • remate · × falta · 🔴 perda · 🟢 recuperação (últ. 12′)</span>
+        <span class="muted">★ golo · • remate · × falta · 🔴 perda · 🟢 recuperação (${this.PITCH_TIME_LABELS[this.pitchTime] || 'todo o jogo'})</span>
       </div>`;
 
     wrap.querySelectorAll('[data-coach-player]').forEach((b) =>
@@ -792,9 +868,11 @@ const CoachDashboard = {
       this.paintScore();
       this.renderFeed();
       this.renderMessages();
+      this.renderPitchFilters();
       this.renderPitch();
       this.renderMomentum();
       this.renderStats();
+      this.renderPatterns();
       this.renderPeriodSummary();
       return;
     }
@@ -819,10 +897,11 @@ const CoachDashboard = {
       this.renderFeed();
     }));
     document.getElementById('coach-role-chip').addEventListener('click', () => this.cycleRole());
-    document.querySelectorAll('[data-layer]').forEach((b) => b.addEventListener('click', () => {
-      const k = b.dataset.layer;
-      this.pitchLayers[k] = !this.pitchLayers[k];
-      b.classList.toggle('active', this.pitchLayers[k]);
+    document.querySelectorAll('[data-layer]').forEach((b) => b.addEventListener('click', () => this.toggleLayer(b.dataset.layer)));
+    document.querySelectorAll('[data-ptime]').forEach((b) => b.addEventListener('click', () => {
+      this.pitchTime = b.dataset.ptime;
+      document.querySelectorAll('[data-ptime]').forEach((x) => x.classList.toggle('active', x === b));
+      this.renderPitchFilters();
       this.renderPitch();
     }));
     document.getElementById('coach-propose-sub').addEventListener('click', () => this.openSubProposeSheet());
@@ -870,6 +949,7 @@ const CoachDashboard = {
     this.renderPitch();
     this.renderMomentum();
     this.renderStats();
+    this.renderPatterns();
     this.renderPeriodSummary();
     if (this._pendingSub) this.renderSubStatus('⏳ Proposta enviada — à espera do analista', 'pending');
     this.paintConnection(SyncCore.status);
@@ -957,9 +1037,11 @@ const CoachDashboard = {
         this.paintScore();
         this.renderFeed();
         this.renderMessages();
+        this.renderPitchFilters();
         this.renderPitch();
         this.renderMomentum();
         this.renderStats();
+        this.renderPatterns();
         this.renderPeriodSummary();
 
         if (env.entityType === 'occurrence' && env.payload?.source === 'golo') {

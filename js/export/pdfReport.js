@@ -762,7 +762,7 @@ const PDFReport = {
     const profile = team?.profile || {};
     this.h1(S, '15c. Scouting do Adversário');
     if (!team) return this.empty(S, 'Sem equipa adversária associada.');
-    this.text(S, `Perfil permanente de ${team.name} — informação recolhida pelo analista, independente deste jogo.`, { size: 9, color: this.COLORS.muted });
+    this.text(S, `Perfil permanente de ${team.name} - informação recolhida pelo analista, independente deste jogo.`, { size: 9, color: this.COLORS.muted });
 
     // Campos preenchidos do modelo de jogo
     let any = false;

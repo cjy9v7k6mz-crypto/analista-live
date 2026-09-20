@@ -11,6 +11,8 @@ const PlayerReport = {
   MAX_TABLE_ROWS: 12,
   /** Momentos/notas mostrados; os restantes ficam contados à parte. */
   MAX_HIGHLIGHTS: 6,
+  /** Tempos de vídeo mostrados na ficha. */
+  MAX_VIDEO_CLIPS: 12,
   /** Métricas mostradas "por 90 minutos" (só com 45 minutos ou mais). */
   PER90_KEYS: ['goals', 'assists', 'chancesCreated', 'shots', 'recuperacoes', 'perdas'],
 
@@ -50,6 +52,33 @@ const PlayerReport = {
     // Linhas jogo a jogo (já vêm do mais recente para o mais antigo). O adversário
     // depende do lado: num plantel adversário, o adversário de cada jogo somos nós.
     const matchById = new Map(entries.map((e) => [e.match.id, e.match]));
+    // Tempos de vídeo: só dos jogos onde a sincronização já foi feita
+    // (match.videoSync). Sem âncora não há tempo — e não se inventa nenhum.
+    const videoClips = [];
+    entries.forEach(({ match, occurrences }) => {
+      const vs = match.videoSync;
+      if (!vs || !vs.anchors || !Object.keys(vs.anchors).length) return;
+      const { clips } = VideoSync.buildClips({
+        match,
+        occurrences: occurrences || [],
+        anchors: vs.anchors,
+        preRoll: vs.preRoll,
+        postRoll: vs.postRoll,
+        sources: vs.sources,
+        playerId: player.id,
+      });
+      clips.forEach((c) => videoClips.push({
+        date: match.date || null,
+        opponent: SeasonTrends.sideOf(match, teamId) === 'opponent' ? match.team : match.opponent,
+        time: VideoSync.formatTime(c.videoSeconds),
+        window: `${VideoSync.formatTime(c.start)}–${VideoSync.formatTime(c.end)}`,
+        name: c.name,
+        note: c.note,
+        gameLabel: c.gameLabel,
+      }));
+    });
+    videoClips.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+
     const rows = agg.perMatch.map((r) => {
       const m = matchById.get(r.matchId);
       return { ...r, opponentName: m && SeasonTrends.sideOf(m, teamId) === 'opponent' ? m.team : r.opponent };
@@ -81,6 +110,8 @@ const PlayerReport = {
       rowsOmitted: Math.max(0, rows.length - this.MAX_TABLE_ROWS),
       highlights: highlights.slice(0, this.MAX_HIGHLIGHTS),
       highlightsOmitted: Math.max(0, highlights.length - this.MAX_HIGHLIGHTS),
+      video: videoClips.slice(0, this.MAX_VIDEO_CLIPS),
+      videoOmitted: Math.max(0, videoClips.length - this.MAX_VIDEO_CLIPS),
     };
   },
 };

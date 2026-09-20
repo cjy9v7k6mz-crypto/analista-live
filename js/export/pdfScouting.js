@@ -207,7 +207,7 @@ const PDFScouting = {
    * nem cortar).
    */
   async sectionSetPieceImages(S, R, n) {
-    R.h1(S, `${n}. Bolas Paradas — Esquemas`);
+    R.h1(S, `${n}. Bolas Paradas - Esquemas`);
     const list = S.ctx.team.scouting?.setPieces || [];
     if (!list.length) return R.empty(S, 'Sem esquemas carregados.');
 
@@ -251,7 +251,7 @@ const PDFScouting = {
     kp.forEach((k) => {
       const p = S.ctx.players.find((x) => x.id === k.playerId);
       if (!p) return;
-      R.text(S, `${p.number ? '#' + p.number + ' ' : ''}${p.name}${p.position ? ' — ' + p.position : ''}`, { bold: true, size: 11 });
+      R.text(S, `${p.number ? '#' + p.number + ' ' : ''}${p.name}${p.position ? ' - ' + p.position : ''}`, { bold: true, size: 11 });
       const filled = KEY_PLAYER_FIELDS.filter((f) => k[f.key] && k[f.key].trim());
       if (filled.length) R.table(S, ['Aspeto', 'Nota'], filled.map((f) => [f.label, k[f.key]]), [0.3, 0.7]);
       else R.empty(S, 'Sem notas.');

@@ -91,6 +91,18 @@ const SettingsScreen = {
           <button type="button" class="btn btn-block" id="btn-test-sync">🔌 Testar ligação ao Supabase</button>
           <pre class="sync-diag" id="sync-diag" hidden></pre>
 
+          <h2 class="section-title">Diagnóstico</h2>
+          <p class="muted settings-note">
+            O que falhou por dentro, com data e hora. Num iPad não há consola: sem
+            isto, um erro durante um jogo não deixava rasto nenhum. Fica só neste
+            aparelho e nunca é enviado para lado nenhum.
+          </p>
+          <div class="diag-log" id="diag-log"></div>
+          <div class="backup-panel">
+            <button type="button" class="btn btn-small" id="btn-diag-copy">📋 Copiar</button>
+            <button type="button" class="btn btn-small" id="btn-diag-clear">Limpar registo</button>
+          </div>
+
           <h2 class="section-title">Interação</h2>
           <label class="field checkbox-field"><input type="checkbox" name="haptics" ${s.haptics ? 'checked' : ''}><span>Vibração (haptic feedback) ao registar evento</span></label>
           <label class="field"><span>Notas manuscritas — o que desenha</span>
@@ -199,6 +211,34 @@ const SettingsScreen = {
       });
     };
     paintSafety();
+
+    // Diagnóstico: o que a rede de segurança apanhou.
+    const paintDiag = () => {
+      const box = document.getElementById('diag-log');
+      if (!box) return;
+      const list = CrashGuard.list();
+      box.textContent = CrashGuard.toText(list);
+      box.classList.toggle('is-empty', !list.length);
+    };
+    paintDiag();
+    document.getElementById('btn-diag-copy')?.addEventListener('click', async () => {
+      const txt = CrashGuard.toText();
+      try {
+        await navigator.clipboard.writeText(txt);
+        toast('Diagnóstico copiado');
+      } catch (err) {
+        // Sem permissão da área de transferência (acontece no iPad fora de um
+        // gesto): mostra o texto para copiar à mão em vez de não fazer nada.
+        window.prompt('Copia o diagnóstico:', txt.slice(0, 2000));
+      }
+    });
+    document.getElementById('btn-diag-clear')?.addEventListener('click', () => {
+      if (!confirm('Limpar o registo de falhas?')) return;
+      CrashGuard.clear();
+      paintDiag();
+      toast('Registo limpo');
+    });
+
     document.getElementById('btn-settings-backup').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       btn.disabled = true;

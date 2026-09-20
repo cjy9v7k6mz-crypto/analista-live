@@ -55,6 +55,7 @@ async function router() {
       try {
         await r.screen().render(root, params);
       } catch (err) {
+        CrashGuard.record('ecrã', err && err.message, err && err.stack, hash, false);
         console.error('Erro ao renderizar ecrã:', err);
         root.innerHTML = `<div class="screen"><p class="muted">Ocorreu um erro a carregar este ecrã. <button class="btn" data-nav="#/dashboard">Voltar ao início</button></p></div>`;
       }
@@ -74,15 +75,48 @@ document.addEventListener('click', (e) => {
 
 window.addEventListener('hashchange', router);
 
+/**
+ * Ecrã de último recurso. Se o arranque falhar, o utilizador tem de ver o que
+ * aconteceu e ter uma saída — em vez de um ecrã branco sem explicação.
+ */
+function bootFailureScreen(err) {
+  const msg = (window.DB && DB.writeErrorText) ? DB.writeErrorText(err) : (err && err.message) || 'Erro desconhecido';
+  root.innerHTML = `
+    <div class="screen">
+      <h1>Não foi possível arrancar</h1>
+      <p class="muted">${Utils.escapeHtml(msg)}</p>
+      <div class="dialog-actions" style="justify-content:flex-start">
+        <button class="btn btn-primary" id="boot-retry">Tentar de novo</button>
+        <button class="btn" data-nav="#/settings">Definições</button>
+      </div>
+      <p class="muted">Se voltar a acontecer, o detalhe fica guardado em Definições → Diagnóstico. Os teus jogos não se perdem por causa disto: estão gravados no dispositivo.</p>
+    </div>`;
+  document.getElementById('boot-retry')?.addEventListener('click', () => location.reload());
+}
+
 async function boot() {
+  CrashGuard.install();
   await AppState.loadSettings();
   // Pede ao browser para não limpar os dados quando falta espaço. Só pede
   // sozinho com a app instalada — no Firefox de computador isto abria uma
   // janela de permissão sem contexto. Nas Definições há o botão para pedir.
   if (DataSafety.isStandalone()) DataSafety.requestPersistence();
   await AppState.loadLibrary();
-  await Migrations.run();
-  await SyncCore.init();
+  // As migrações correm em TODOS os arranques (são idempotentes, curam dados
+  // antigos). Por isso não podem ser fatais: um único registo estragado — de um
+  // backup antigo, por exemplo — deixaria a app sem arrancar para sempre.
+  try {
+    await Migrations.run();
+  } catch (e) {
+    CrashGuard.record('migração', e && e.message, e && e.stack, 'Migrations.run', false);
+    console.warn('Migrações: falha não fatal', e);
+  }
+  try {
+    await SyncCore.init();
+  } catch (e) {
+    CrashGuard.record('sincronização', e && e.message, e && e.stack, 'SyncCore.init', false);
+    console.warn('Sync: init falhou', e);
+  }
   applyTheme();
 
   // Recuperação: se existir jogo em curso e não estamos já a navegar para ele
@@ -114,4 +148,10 @@ async function boot() {
   }
 }
 
-boot();
+// O arranque não pode terminar em ecrã branco: o que falhar fica registado e
+// o utilizador recebe uma saída.
+boot().catch((err) => {
+  try { CrashGuard.record('arranque', err && err.message, err && err.stack, 'boot', false); } catch (e) { /* ignora */ }
+  console.error('Arranque falhou:', err);
+  bootFailureScreen(err);
+});

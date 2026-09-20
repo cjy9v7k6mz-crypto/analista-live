@@ -55,6 +55,31 @@ const SyncCore = {
     window.addEventListener('online', () => this.flush());
     window.addEventListener('offline', () => this._setStatus('offline'));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) this.flush(); });
+    // A tabela de deduplicação também tem de ser varrida (ver purgeApplied).
+    this.purgeApplied();
+  },
+
+  /**
+   * Limpa ids de envelopes já aplicados que são antigos de mais para voltarem a
+   * aparecer. Sem isto, `syncApplied` crescia para sempre no iPad — o mesmo
+   * padrão que encheu a base do Supabase.
+   *
+   * 14 dias é folgado: os envelopes vivem 2 dias no servidor. O que se perde no
+   * pior caso é reaplicar um registo antigo, e isso é inofensivo — todas as
+   * operações são idempotentes (upsert por id).
+   */
+  APPLIED_TTL_DAYS: 14,
+
+  async purgeApplied() {
+    try {
+      const limite = Date.now() - this.APPLIED_TTL_DAYS * 86400000;
+      const todos = await DB.getAll(DB.STORES.syncApplied);
+      const velhos = todos.filter((r) => !r.at || r.at < limite);
+      for (const r of velhos) await DB.delete(DB.STORES.syncApplied, r.id);
+      return velhos.length;
+    } catch (e) {
+      return 0; // uma limpeza que falha nunca pode impedir a sincronização
+    }
   },
 
   /** Código curto e legível para o segundo dispositivo entrar na sessão. */
