@@ -654,6 +654,99 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
 .history-row.is-unsaved { border-left: 3px solid var(--c-red); }
 .history-unsaved { font-size: 12px; }
 
+/* ---------- Campeonato ---------- */
+.comp-season { font-size: 13px; color: var(--text-mute); font-family: var(--font-mono); }
+.comp-tabs { display: flex; gap: 8px; padding: 0 20px 12px; }
+.comp-tab { flex: 1; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text-dim);
+  border-radius: var(--radius); padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer; }
+.comp-tab.active { background: var(--c-blue-bg); border-color: var(--c-blue); color: var(--c-blue); }
+.comp-progress { padding: 0 20px; }
+.comp-table-wrap { overflow-x: auto; padding: 0 20px; }
+.comp-table { width: 100%; border-collapse: collapse; min-width: 560px; }
+.comp-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-mute);
+  padding: 8px 4px; text-align: center; border-bottom: 1px solid var(--border-strong); font-weight: 700; }
+.comp-table td { padding: 9px 4px; text-align: center; border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 14px; }
+.comp-table th.c-team, .comp-table td.c-team { text-align: left; font-family: var(--font); font-weight: 600; }
+/* O nome da equipa é a porta para o dossiê — parece texto, comporta-se como botão. */
+.comp-team-link { background: none; border: none; padding: 0; font: inherit; color: inherit;
+  text-align: left; cursor: pointer; text-decoration: underline; text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px; }
+.comp-team-link:hover { text-decoration-color: var(--c-blue); color: var(--c-blue); }
+.comp-table td.c-pos { color: var(--text-mute); width: 28px; }
+.comp-table td.c-pts { font-weight: 800; font-size: 16px; }
+.comp-table tr.is-us { background: var(--c-blue-bg); }
+.comp-table tr.is-us td { color: var(--text); }
+.comp-table tr.is-us td.c-team { color: var(--c-blue); font-weight: 800; }
+.comp-table td.is-pos { color: var(--c-green); }
+.comp-table td.is-neg { color: var(--c-red); }
+.c-form { white-space: nowrap; }
+.comp-form { display: inline-block; width: 16px; height: 16px; line-height: 16px; border-radius: 3px;
+  font-size: 10px; font-weight: 800; margin-right: 2px; color: #06101f; }
+.comp-form.is-V { background: var(--c-green); }
+.comp-form.is-E { background: var(--text-mute); }
+.comp-form.is-D { background: var(--c-red); color: #fff; }
+
+.comp-round-nav { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 0 20px 12px; }
+.comp-round-nav select { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: var(--radius-sm); padding: 10px 14px; font-size: 15px; font-weight: 600; }
+.comp-fixtures { display: flex; flex-direction: column; gap: 6px; padding: 0 20px; }
+.comp-fixture { display: grid; grid-template-columns: 116px 1fr auto 1fr 26px; align-items: center; gap: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; }
+.comp-fixture.is-us { border-color: var(--c-blue); background: var(--c-blue-bg); }
+.cf-date { font-size: 11px; color: var(--text-mute); font-family: var(--font-mono); }
+.cf-home { text-align: right; font-weight: 600; font-size: 14px; }
+.cf-away { text-align: left; font-weight: 600; font-size: 14px; }
+.cf-score { display: flex; gap: 6px; align-items: center; }
+.cf-score input { width: 46px; text-align: center; background: var(--surface-2); border: 1px solid var(--border-strong);
+  color: var(--text); border-radius: var(--radius-sm); padding: 8px 2px; font-size: 17px;
+  font-family: var(--font-mono); font-weight: 700; }
+.cf-score input:focus { border-color: var(--c-blue); outline: none; }
+.cf-score input.saved { border-color: var(--c-green); }
+.cf-score.is-linked { font-family: var(--font-mono); font-size: 18px; font-weight: 800; color: var(--c-blue); }
+.cf-tag { text-align: center; font-size: 13px; }
+.comp-seed { display: flex; flex-direction: column; gap: 6px; align-items: center; background: var(--surface);
+  border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 18px; margin-top: 14px; }
+
+@media (max-width: 720px) {
+  .comp-table .c-wide { display: none; }
+  .comp-fixture { grid-template-columns: 1fr auto 1fr 22px; }
+  .cf-date { grid-column: 1 / -1; }
+}
+
+/* ---------- Avisos ao vivo ---------- */
+.live-alerts { display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px; }
+.live-alerts:empty { display: none; }
+.live-alert { display: flex; align-items: flex-start; gap: 8px; padding: 7px 10px; font-size: 13px; font-weight: 600;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--surface); line-height: 1.35; }
+.live-alert.is-warn { background: var(--c-yellow-bg); border-color: var(--c-yellow); color: var(--c-yellow); }
+.live-alert.is-good { background: var(--c-green-bg); border-color: var(--c-green); color: var(--c-green); }
+.live-alert.is-info { color: var(--text-dim); }
+.live-alert-icon { flex-shrink: 0; }
+.coach-alerts { margin-bottom: 6px; }
+
+/* ---------- Ajustes: decisão e efeito ---------- */
+.ht-card-adjust .adj-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.adj-preset { font-size: 12px; }
+.adj-input-row { display: flex; gap: 8px; }
+.adj-input-row input { flex: 1; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: var(--radius-sm); padding: 10px 12px; font-size: 15px; }
+.adj-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px;
+  background: var(--surface-2); border-left: 3px solid var(--c-blue); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 14px; }
+.adj-block { margin-bottom: 14px; }
+.adj-title { margin: 0 0 2px; font-size: 15px; display: flex; align-items: baseline; gap: 8px; }
+.adj-when { font-family: var(--font-mono); font-size: 12px; color: var(--c-blue); }
+.adj-scope { margin: 0 0 8px; font-size: 12px; }
+.adj-rows { display: flex; flex-direction: column; gap: 4px; }
+.adj-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: baseline;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px; }
+.adj-row.is-good { border-left-color: var(--c-green); }
+.adj-row.is-bad { border-left-color: var(--c-red); }
+.adj-label { font-weight: 600; }
+.adj-nums { font-family: var(--font-mono); }
+.adj-raw { font-size: 11px; color: var(--text-mute); font-family: var(--font-mono); }
+
 /* ---------- Carga do plantel ---------- */
 .sl-block { margin: 18px 0; }
 .sl-intro { margin: 0 0 10px; }

@@ -67,14 +67,32 @@ const PDFBriefing = {
     }
 
     // ---- 2. Perfil do adversário ----
-    R.h1(S, '2. Perfil do adversário');
+    // ---- 2. Histórico direto ----
+    R.h1(S, '2. Como correram os jogos anteriores');
+    const h2h = MatchStats.headToHead(ctx.opponentTeam ? ctx.opponentTeam.id : null, ctx.history || []);
+    if (!h2h.rows.length) {
+      note('Primeiro jogo registado contra este adversário.');
+    } else {
+      const t = h2h.totals;
+      R.text(S, `${t.played} ${t.played === 1 ? 'jogo' : 'jogos'}: ${t.wins}V ${t.draws}E ${t.losses}D · golos ${t.goalsFor}-${t.goalsAgainst}`, { size: 11 });
+      S.y -= 6;
+      R.table(S, ['Data', 'Resultado', 'Competição', 'Previsões confirmadas'], h2h.rows.map((r) => [
+        r.date ? Utils.formatDate(r.date) : '-',
+        `${r.result} ${r.ourGoals}-${r.theirGoals}`,
+        r.competition || '-',
+        r.tracked ? `${r.confirmed} de ${r.tracked}` : '-',
+      ]), [90, 90, 160, 160]);
+      note('"Previsões confirmadas" = itens do dossiê que estavam no plano desse jogo e chegaram mesmo a acontecer.');
+    }
+
+    R.h1(S, '3. Perfil do adversário');
     const profile = (ctx.opponentTeam && ctx.opponentTeam.profile) || {};
     const quick = QUICK_PROFILE.map((q) => [q.label, profile[q.key]]).filter((r) => r[1] && String(r[1]).trim());
     if (!quick.length) note('Sem perfil preenchido no scouting desta equipa.');
     else R.table(S, ['Campo', 'Valor'], quick, [0.35, 0.65]);
 
     // ---- 3. O que o dossiê diz ----
-    R.h1(S, '3. O que o dossiê diz');
+    R.h1(S, '4. O que o dossiê diz');
     const sc = (ctx.opponentTeam && ctx.opponentTeam.scouting) || {};
     const rows = [];
     SCOUTING_LISTS.forEach((list) => {
@@ -86,7 +104,7 @@ const PDFBriefing = {
     else R.table(S, ['Tipo', 'Item', 'Histórico'], rows, [0.24, 0.54, 0.22]);
 
     // ---- 4. Jogadores-chave ----
-    R.h1(S, '4. Jogadores-chave do adversário');
+    R.h1(S, '5. Jogadores-chave do adversário');
     const keyPlayers = sc.keyPlayers || [];
     if (!keyPlayers.length) {
       note('Sem jogadores-chave definidos.');
@@ -104,7 +122,7 @@ const PDFBriefing = {
     // ---- 5. Onze previsto ----
     const positions = (m.teams?.own?.positions || []).filter((pos) => pos.playerId);
     if (positions.length) {
-      R.h1(S, '5. Onze previsto');
+      R.h1(S, '6. Onze previsto');
       const byId = new Map((ctx.ownPlayers || []).map((p) => [p.id, p]));
       R.table(S, ['Nº', 'Jogador', 'Posição'], positions.map((pos) => {
         const p = byId.get(pos.playerId);

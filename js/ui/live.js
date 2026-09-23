@@ -122,6 +122,8 @@ const LiveScreen = {
               <button class="quick-btn quick-sketch" id="btn-sketch">✏️<span>Manuscrito</span></button>
               <button class="quick-btn quick-bench" id="btn-bench-msg">📣<span>Comunicar</span></button>
             </div>
+            <!-- Avisos: lidos do que já foi registado, enquanto ainda dá para agir. -->
+            <div class="live-alerts" id="live-alerts"></div>
             <div class="history-panel">
               <div class="history-head">
                 <h3>Histórico</h3>
@@ -582,6 +584,31 @@ const LiveScreen = {
     feed.innerHTML = recent.map((o) => this.historyRow(o)).join('');
     // A barra acompanha sempre o histórico: quem chama um, atualiza o outro.
     this.renderQuickBar();
+    this.renderAlerts();
+  },
+
+  // ---------- Avisos ao vivo ----------
+  _seenAlerts: new Set(),
+
+  /**
+   * Lê o que já foi registado e diz o que isso significa agora. Só aparece
+   * quando há alguma coisa a dizer — uma caixa vazia permanente seria ruído.
+   */
+  renderAlerts() {
+    const box = document.getElementById('live-alerts');
+    if (!box || !this.match) return;
+    const minuto = AppState.timer ? AppState.timer.getGameTimeParts().minute : 0;
+    const alertas = LiveAlerts.compute(this.match, this.occurrences, minuto, (id) => this.findPlayerById(id));
+    if (!alertas.length) { box.innerHTML = ''; return; }
+    box.innerHTML = alertas.map((a) => `
+      <div class="live-alert is-${a.level}">
+        <span class="live-alert-icon">${a.icon}</span>
+        <span>${Utils.escapeHtml(a.text)}</span>
+      </div>`).join('');
+    // Um toque de vibração só na primeira vez que um aviso sério aparece.
+    const novos = LiveAlerts.fresh(alertas.filter((a) => a.level === 'warn'), this._seenAlerts);
+    alertas.forEach((a) => this._seenAlerts.add(a.id));
+    if (novos.length) Utils.vibrate(40);
   },
 
   // ---------- Desfazer global · Repetir último ----------

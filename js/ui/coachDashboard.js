@@ -197,6 +197,7 @@ const CoachDashboard = {
           </section>
 
           <section class="coach-centre">
+            <div class="live-alerts coach-alerts" id="coach-alerts"></div>
             <div class="coach-pitch-filters" id="coach-pitch-filters">${this.pitchFilterChips()}</div>
             <div class="coach-pitch-filters coach-pitch-time" id="coach-pitch-time">
               ${[['all', 'Jogo todo'], ['1T', '1ª P'], ['2T', '2ª P'], ['last10', "Últ. 10'"], ['last5', "Últ. 5'"]]
@@ -497,6 +498,22 @@ const CoachDashboard = {
     const t = document.getElementById('coach-stats-table');
     if (!t || !this.match) return;
     t.innerHTML = this.statRows(MatchStats.compute(this.match, this.occurrences));
+  },
+
+  /**
+   * Os mesmos avisos do ecrã do analista, calculados aqui com os mesmos dados.
+   * Não passam pela rede: o banco já tem tudo o que é preciso para os deduzir.
+   */
+  renderAlerts() {
+    const box = document.getElementById('coach-alerts');
+    if (!box || !this.match) return;
+    const alertas = LiveAlerts.compute(this.match, this.occurrences, this.currentMinute(),
+      (id) => this.players.find((p) => p.id === id) || null);
+    box.innerHTML = alertas.slice(0, 3).map((a) => `
+      <div class="live-alert is-${a.level}">
+        <span class="live-alert-icon">${a.icon}</span>
+        <span>${Utils.escapeHtml(a.text)}</span>
+      </div>`).join('');
   },
 
   /** Padrões em versão curta, sempre visíveis (o bloco completo fica no botão 🔗). */
@@ -873,6 +890,7 @@ const CoachDashboard = {
       this.renderMomentum();
       this.renderStats();
       this.renderPatterns();
+      this.renderAlerts();
       this.renderPeriodSummary();
       return;
     }
@@ -950,6 +968,7 @@ const CoachDashboard = {
     this.renderMomentum();
     this.renderStats();
     this.renderPatterns();
+    this.renderAlerts();
     this.renderPeriodSummary();
     if (this._pendingSub) this.renderSubStatus('⏳ Proposta enviada — à espera do analista', 'pending');
     this.paintConnection(SyncCore.status);
@@ -1042,6 +1061,7 @@ const CoachDashboard = {
         this.renderMomentum();
         this.renderStats();
         this.renderPatterns();
+        this.renderAlerts();
         this.renderPeriodSummary();
 
         if (env.entityType === 'occurrence' && env.payload?.source === 'golo') {

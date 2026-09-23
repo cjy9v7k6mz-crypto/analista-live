@@ -1115,3 +1115,327 @@ describe('ScoutingFeedback — o dossiê a aprender com os jogos', () => {
     eq(ScoutingFeedback.suggestions({ name: 'X' }, []).length, 0);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('AdjustmentEffect — a decisão e o que aconteceu a seguir', () => {
+  const ajuste = (minute, nota, period) => occ({ source: 'ajuste', minute, period: period || '2T', note: nota, eventName: 'Ajuste: ' + nota });
+  const remate = (minute, team = 'own') => occ({ source: 'remate', minute, team, meta: { result: 'wide' } });
+  const rec = (minute) => occ({ source: 'recuperacao', minute, team: 'own' });
+
+  it('ajuste de intervalo compara parte com parte', () => {
+    const lista = [ajuste(45, 'Subir a pressão', 'HT'), rec(10), rec(20), rec(50), rec(55), rec(60), rec(70), remate(80)];
+    const e = AdjustmentEffect.effect(match(), lista, lista[0]);
+    eq(e.halftime, true);
+    eq([e.before.minutes, e.after.minutes], [45, 45]);
+    eq([e.before.recuperacoes, e.after.recuperacoes], [2, 4]);
+    const linha = e.rows.find((r) => r.key === 'recuperacoes');
+    eq([linha.before, linha.after, linha.tone], [0.7, 1.3, 'good'], 'por 15 minutos, e mais recuperações é bom');
+  });
+
+  it('ajuste durante o jogo usa janelas iguais dos dois lados', () => {
+    const a = ajuste(60, 'Trocar o lado');
+    const lista = [a, remate(50), remate(55), remate(62), remate(66), remate(70), remate(88)];
+    const e = AdjustmentEffect.effect(match(), lista, a, { window: 15 });
+    eq(e.halftime, false);
+    eq([e.before.minutes, e.after.minutes], [15, 15]);
+    eq([e.before.shots, e.after.shots], [2, 3], 'o remate ao minuto 88 fica fora da janela');
+  });
+
+  it('mais perdas ou mais remates sofridos é mau, não bom', () => {
+    const a = ajuste(60, 'x');
+    const lista = [a, remate(70, 'opponent'), remate(72, 'opponent')];
+    const e = AdjustmentEffect.effect(match(), lista, a);
+    eq(e.rows.find((r) => r.key === 'shotsAgainst').tone, 'bad');
+  });
+
+  it('a janela nunca passa o fim do jogo', () => {
+    const a = ajuste(85, 'x');
+    // Jogo terminado: o fim é 90', mesmo que o último registo seja aos 86.
+    const e = AdjustmentEffect.effect(match(), [a, remate(86)], a);
+    eq(e.after.minutes, 5, 'do 85 ao 90');
+    // A decorrer, vale o último registo — não se inventam minutos que não houve.
+    const emCurso = AdjustmentEffect.effect(match({ status: 'live' }), [a, remate(86)], a);
+    eq(emCurso.after.minutes, 1);
+  });
+
+  it('os ajustes do adversário não contam como nossos; mudanças táticas contam', () => {
+    const lista = [
+      ajuste(45, 'nosso', 'HT'),
+      occ({ source: 'tatica', minute: 60, team: 'own', eventName: 'Mudança tática' }),
+      occ({ source: 'tatica', minute: 70, team: 'opponent', eventName: 'Mudança deles' }),
+    ];
+    eq(AdjustmentEffect.markers(lista).length, 2);
+  });
+
+  it('sem ajustes, diz o que fazer em vez de mostrar uma tabela vazia', () => {
+    const html = AdjustmentEffect.renderHTML(match(), [remate(10)]);
+    ok(html.includes('intervalo'), html);
+  });
+});
+
+describe('LiveAlerts — avisos enquanto ainda dá para agir', () => {
+  const jogo = (extra = {}) => match({ cards: [], teams: { own: { teamId: 'T', starterIds: ['a', 'b'], subIds: [] }, opponent: { teamId: 'O', starterIds: ['x'] } }, ...extra });
+  const falta = (minute, quem) => occ({ source: 'falta', minute, meta: { committedById: quem, consequences: [] } });
+  const perda = (minute, quem) => occ({ source: 'perda', minute, team: 'own', meta: { ownPlayerId: quem, location: { x: 0.5, y: 0.5 } } });
+  const remate = (minute, team) => occ({ source: 'remate', minute, team, meta: { result: 'wide' } });
+  const nomes = (id) => ({ a: 'J5', b: 'J8', x: 'R7' }[id] ? { shortName: { a: 'J5', b: 'J8', x: 'R7' }[id] } : null);
+
+  it('amarelo + nova falta = risco de expulsão, e só depois do cartão', () => {
+    const m = jogo({ cards: [{ id: 'c1', playerId: 'a', color: 'yellow', minute: 30 }] });
+    eq(LiveAlerts.compute(m, [falta(20, 'a')], 40, nomes).length, 0, 'falta anterior ao cartão não conta');
+    const alertas = LiveAlerts.compute(m, [falta(20, 'a'), falta(38, 'a')], 40, nomes);
+    eq(alertas.map((x) => x.level), ['warn']);
+    ok(alertas[0].text.includes('J5') && alertas[0].text.includes('risco'), alertas[0].text);
+  });
+
+  it('a falta que deu o amarelo não conta como falta nova', () => {
+    const f = falta(30, 'a');
+    const m = jogo({ cards: [{ id: 'c1', playerId: 'a', color: 'yellow', minute: 30, fromFoulId: f.id }] });
+    eq(LiveAlerts.compute(m, [f], 32, nomes).length, 0);
+    eq(LiveAlerts.compute(m, [f, falta(40, 'a')], 42, nomes).length, 1, 'a seguinte já conta');
+  });
+
+  it('amarelo do adversário é informação, não alarme', () => {
+    const m = jogo({ cards: [{ id: 'c1', playerId: 'x', color: 'yellow', minute: 30 }] });
+    const alertas = LiveAlerts.compute(m, [falta(35, 'x')], 40, nomes);
+    eq(alertas[0].level, 'info');
+    ok(alertas[0].text.includes('explorar'), alertas[0].text);
+  });
+
+  it('três remates sofridos em 10 minutos avisa; dois não', () => {
+    const m = jogo();
+    eq(LiveAlerts.compute(m, [remate(62, 'opponent'), remate(65, 'opponent')], 70, nomes).length, 0);
+    const alertas = LiveAlerts.compute(m, [remate(62, 'opponent'), remate(65, 'opponent'), remate(68, 'opponent')], 70, nomes);
+    eq(alertas.map((x) => x.icon), ['🛡']);
+  });
+
+  it('quebra individual: perdas concentradas em quem antes não as tinha', () => {
+    const m = jogo();
+    const lista = [perda(60, 'b'), perda(65, 'b'), perda(68, 'b')];
+    ok(LiveAlerts.compute(m, lista, 70, nomes).some((a) => a.id.startsWith('quebra:b')), 'avisa');
+    // Quem perde sempre não é novidade nenhuma — não avisa.
+    const sempre = [perda(5, 'b'), perda(15, 'b'), perda(25, 'b'), perda(35, 'b'), ...lista];
+    eq(LiveAlerts.compute(m, sempre, 70, nomes).filter((a) => a.id.startsWith('quebra')).length, 0);
+  });
+
+  it('um foco a repetir-se na janela', () => {
+    const m = jogo({ observationPlan: [{ id: 'pe1', name: 'Cantos ao 2º poste', isFocus: true }] });
+    const lista = [65, 67, 69].map((min) => occ({ minute: min, planEventId: 'pe1' }));
+    const a = LiveAlerts.compute(m, lista, 70, nomes).find((x) => x.id.startsWith('foco'));
+    ok(a && a.text.includes('3 vezes'), a && a.text);
+  });
+
+  it('cada aviso só é novo uma vez', () => {
+    const m = jogo();
+    const lista = [remate(62, 'opponent'), remate(65, 'opponent'), remate(68, 'opponent')];
+    const alertas = LiveAlerts.compute(m, lista, 70, nomes);
+    const vistos = new Set();
+    eq(LiveAlerts.fresh(alertas, vistos).length, 1);
+    alertas.forEach((a) => vistos.add(a.id));
+    eq(LiveAlerts.fresh(alertas, vistos).length, 0);
+  });
+
+  it('jogo sem nada registado não inventa avisos', () => {
+    eq(LiveAlerts.compute(jogo(), [], 30, nomes).length, 0);
+  });
+});
+
+describe('MatchStats.headToHead — como correram os jogos contra eles', () => {
+  const jogo = (id, date, nossos, deles, comoOwn = true) => ({
+    match: match({ id, date, status: 'finished', competition: 'Liga',
+      score: comoOwn ? { team: nossos, opponent: deles } : { team: deles, opponent: nossos },
+      teams: comoOwn ? { own: { teamId: 'NOS' }, opponent: { teamId: 'ELES' } } : { own: { teamId: 'ELES' }, opponent: { teamId: 'NOS' } },
+      observationPlan: [{ id: 'p1', name: 'x', scoutingRef: { list: 'weaknesses', itemId: 'w1' } }] }),
+    occurrences: [],
+  });
+
+  it('conta vitórias, empates e derrotas do nosso lado', () => {
+    const h = MatchStats.headToHead('ELES', [jogo('m1', '2026-01-01', 2, 1), jogo('m2', '2026-02-01', 0, 0), jogo('m3', '2026-03-01', 1, 3)]);
+    eq([h.totals.played, h.totals.wins, h.totals.draws, h.totals.losses], [3, 1, 1, 1]);
+    eq([h.totals.goalsFor, h.totals.goalsAgainst], [3, 4]);
+  });
+
+  it('conta bem quando fomos registados como equipa "adversária"', () => {
+    const h = MatchStats.headToHead('ELES', [jogo('m1', '2026-01-01', 2, 1, false)]);
+    eq([h.rows[0].ourGoals, h.rows[0].theirGoals, h.rows[0].result], [2, 1, 'V']);
+  });
+
+  it('mais recente primeiro, e jogos por terminar ficam de fora', () => {
+    const porJogar = jogo('m9', '2026-04-01', 0, 0);
+    porJogar.match.status = 'live';
+    const h = MatchStats.headToHead('ELES', [jogo('m1', '2026-01-01', 1, 0), jogo('m2', '2026-03-01', 1, 0), porJogar]);
+    eq(h.rows.map((r) => r.date), ['2026-03-01', '2026-01-01']);
+  });
+
+  it('diz quantas previsões do dossiê se confirmaram em cada jogo', () => {
+    const g = jogo('m1', '2026-01-01', 1, 0);
+    g.occurrences = [occ({ planEventId: 'p1' })];
+    const h = MatchStats.headToHead('ELES', [g]);
+    eq([h.rows[0].confirmed, h.rows[0].tracked], [1, 1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('Standings — a classificação calculada', () => {
+  const prova = (fixtures, extra = {}) => ({
+    teams: ['A', 'B', 'C', 'D'], pointsPerWin: 3, pointsPerDraw: 1,
+    tiebreakers: Standings.DEFAULT_TIEBREAKERS, fixtures, ...extra,
+  });
+  const j = (round, home, away, hg, ag, date) => ({
+    id: `f${round}${home}${away}`, round, home, away,
+    homeGoals: hg, awayGoals: ag, date: date || `2026-09-${String(round).padStart(2, '0')}`,
+  });
+
+  it('só conta jogos com os dois resultados preenchidos', () => {
+    const c = prova([j(1, 'A', 'B', 2, 0), j(1, 'C', 'D', null, null), { id: 'x', round: 2, home: 'A', away: 'C', homeGoals: 1, awayGoals: null }]);
+    const t = Standings.compute(c);
+    eq(t.find((r) => r.team === 'A').played, 1);
+    eq(t.find((r) => r.team === 'C').played, 0, 'meio resultado não conta');
+  });
+
+  it('pontos, golos e diferença', () => {
+    const t = Standings.compute(prova([j(1, 'A', 'B', 3, 1), j(2, 'B', 'A', 2, 2)]));
+    const a = t.find((r) => r.team === 'A'), b = t.find((r) => r.team === 'B');
+    eq([a.points, a.wins, a.draws, a.goalsFor, a.goalsAgainst, a.goalDiff], [4, 1, 1, 5, 3, 2]);
+    eq([b.points, b.losses, b.goalDiff], [1, 1, -2]);
+  });
+
+  it('casa e fora contam em separado', () => {
+    const t = Standings.compute(prova([j(1, 'A', 'B', 1, 0), j(2, 'B', 'A', 3, 0)]));
+    const a = t.find((r) => r.team === 'A');
+    eq([a.home.wins, a.home.goalsFor], [1, 1]);
+    eq([a.away.losses, a.away.goalsAgainst], [1, 3]);
+  });
+
+  it('a forma segue a ordem das datas, não a do array', () => {
+    const c = prova([
+      { id: 'f2', round: 2, home: 'A', away: 'C', homeGoals: 0, awayGoals: 1, date: '2026-10-10' },
+      { id: 'f1', round: 1, home: 'A', away: 'B', homeGoals: 2, awayGoals: 0, date: '2026-10-03' },
+    ]);
+    eq(Standings.compute(c).find((r) => r.team === 'A').form, ['V', 'D']);
+    eq(Standings.compute(c).find((r) => r.team === 'A').streak, { type: 'D', n: 1 });
+  });
+
+  it('o confronto direto vem ANTES da diferença de golos', () => {
+    // Caso construído para os dois critérios discordarem:
+    //   A ganhou a B (confronto direto a favor de A),
+    //   mas A levou 0-5 com o C e B só perdeu 0-1 (diferença a favor de B).
+    // Com a ordem da AF Braga, quem manda é o confronto direto: A à frente.
+    const c = prova([j(1, 'A', 'B', 1, 0), j(2, 'C', 'A', 5, 0), j(3, 'B', 'D', 1, 0)]);
+    const t = Standings.compute(c);
+    const a = t.find((r) => r.team === 'A'), b = t.find((r) => r.team === 'B');
+    eq([a.points, b.points], [3, 3], 'mesmos pontos');
+    eq([a.goalDiff, b.goalDiff], [-4, 0], 'a diferença favorece B');
+    ok(a.position < b.position, `A (${a.position}) à frente de B (${b.position}) pelo confronto direto`);
+    // Trocando a ordem dos critérios, é B que sobe — prova que o critério manda mesmo.
+    const porDG = Standings.compute({ ...c, tiebreakers: ['points', 'goalDiff'] });
+    ok(porDG.find((r) => r.team === 'B').position < porDG.find((r) => r.team === 'A').position);
+  });
+
+  it('confronto direto: pontos primeiro, golos desses jogos a seguir', () => {
+    // Uma vitória para cada lado: 3-3 em pontos. A marcou 3, B marcou 2 -> A.
+    ok(Standings.headToHeadCompare('A', 'B', [j(1, 'A', 'B', 3, 1), j(2, 'B', 'A', 1, 0)]) < 0, 'A à frente');
+    ok(Standings.headToHeadCompare('B', 'A', [j(1, 'A', 'B', 3, 1), j(2, 'B', 'A', 1, 0)]) > 0, 'simétrico');
+    // Empates simétricos não desempatam nada.
+    eq(Standings.headToHeadCompare('A', 'B', [j(1, 'A', 'B', 1, 1)]), 0);
+    eq(Standings.headToHeadCompare('A', 'B', [j(1, 'A', 'B', 2, 2), j(2, 'B', 'A', 1, 1)]), 0);
+  });
+
+  it('quem ainda não se defrontou não é desempatado pelo confronto direto', () => {
+    eq(Standings.headToHeadCompare('A', 'D', [j(1, 'A', 'B', 1, 0)]), 0);
+  });
+
+  it('a ordem dos desempates é configurável', () => {
+    // Só por diferença de golos, B (+3) fica à frente de A (+1) com os mesmos pontos.
+    const fixtures = [j(1, 'A', 'C', 1, 0), j(2, 'B', 'D', 3, 0), j(3, 'A', 'B', 0, 0)];
+    const porDG = Standings.compute(prova(fixtures, { tiebreakers: ['points', 'goalDiff'] }));
+    eq(porDG[0].team, 'B');
+  });
+
+  it('equipas sem jogos aparecem a zero, não desaparecem', () => {
+    const t = Standings.compute(prova([j(1, 'A', 'B', 1, 0)]));
+    eq(t.length, 4);
+    eq(t.find((r) => r.team === 'D').played, 0);
+  });
+
+  it('tabela numa jornada anterior', () => {
+    const c = prova([j(1, 'A', 'B', 5, 0), j(2, 'B', 'A', 5, 0)]);
+    eq(Standings.compute(c, { upToRound: 1 }).find((r) => r.team === 'A').points, 3);
+    eq(Standings.compute(c).find((r) => r.team === 'A').points, 3, 'com as duas, ficam empatados a 3');
+    eq(Standings.compute(c).find((r) => r.team === 'B').points, 3);
+  });
+
+  it('jornada atual = a primeira por completar', () => {
+    const c = prova([j(1, 'A', 'B', 1, 0), j(2, 'A', 'C', null, null)]);
+    eq(Standings.currentRound(c), 2);
+    const tudoFeito = prova([j(1, 'A', 'B', 1, 0)]);
+    eq(Standings.currentRound(tudoFeito), 1, 'época completa: fica na última');
+  });
+
+  it('próximos jogos de uma equipa: só os que faltam', () => {
+    const c = prova([j(1, 'A', 'B', 1, 0), j(2, 'C', 'A', null, null), j(3, 'A', 'D', null, null)]);
+    eq(Standings.nextFixtures(c, 'A').map((f) => f.round), [2, 3]);
+  });
+});
+
+describe('Standings.sameTeam — o mesmo clube escrito de várias maneiras', () => {
+  it('ignora pontos, espaços, acentos e maiúsculas', () => {
+    ok(Standings.sameTeam('Desp. S. Cosme', 'Desp S Cosme'));
+    ok(Standings.sameTeam('Caç. Taipas', 'Cac Taipas'));
+    ok(Standings.sameTeam('ABAÇÃO', 'abacao'));
+    ok(Standings.sameTeam('GD S. Cristovão', 'GD S. Cristóvão'), 'acento a mais não muda a equipa');
+  });
+  it('não junta equipas diferentes', () => {
+    eq(Standings.sameTeam('Operário Campelos', 'Operário Famalicão'), false);
+    eq(Standings.sameTeam('Desp. Ronfe', 'Juv. Ronfe'), false);
+    eq(Standings.sameTeam('Desp. Ronfe', 'Desportivo de Ronfe'), false, 'nomes longos não se adivinham — a nossa equipa liga-se pela marca de "própria"');
+  });
+  it('vazios nunca são iguais', () => {
+    eq(Standings.sameTeam('', ''), false);
+    eq(Standings.sameTeam(null, 'X'), false);
+    eq(Standings.sameTeam('...', '---'), false);
+  });
+});
+
+describe('Standings.fromSeed — a prova real do ficheiro', () => {
+  const seed = (window.COMPETITION_SEEDS || [])[0];
+
+  it('a semente está completa e coerente', () => {
+    ok(seed, 'não há prova no ficheiro');
+    eq(seed.teams.length, 16);
+    eq(seed.fixtures.length, 240);
+    eq(new Set(seed.fixtures.map((f) => f[0])).size, 30, '30 jornadas');
+    const porJornada = {};
+    seed.fixtures.forEach((f) => { porJornada[f[0]] = (porJornada[f[0]] || 0) + 1; });
+    eq([...new Set(Object.values(porJornada))], [8], '8 jogos por jornada');
+  });
+
+  it('cada equipa joga 15 em casa e 15 fora', () => {
+    seed.teams.forEach((t) => {
+      eq(seed.fixtures.filter((f) => f[3] === t).length, 15, `${t} em casa`);
+      eq(seed.fixtures.filter((f) => f[4] === t).length, 15, `${t} fora`);
+    });
+  });
+
+  it('converte para prova gravável, sem resultados e com desempates por omissão', () => {
+    const c = Standings.fromSeed(seed);
+    eq(c.fixtures.length, 240);
+    eq(c.fixtures.every((f) => f.homeGoals === null && f.awayGoals === null), true);
+    eq(c.tiebreakers, ['points', 'headToHead', 'goalDiff', 'goalsFor']);
+    eq(Standings.compute(c).every((r) => r.played === 0 && r.points === 0), true, 'época por começar: tudo a zero');
+    eq(Standings.compute(c).length, 16);
+  });
+
+  it('o jogo por agendar fica marcado, em vez de ir parar ao fim da época', () => {
+    const c = Standings.fromSeed(seed);
+    const porAgendar = c.fixtures.filter((f) => f.tbd);
+    eq(porAgendar.length, 1);
+    eq([porAgendar[0].round, porAgendar[0].home, porAgendar[0].away], [1, 'Bairro FC', 'Cabeceirense']);
+  });
+
+  it('o nosso primeiro jogo é o que o calendário diz', () => {
+    const c = Standings.fromSeed(seed);
+    const nossos = Standings.nextFixtures(c, 'Desp. Ronfe', 1)[0];
+    eq([nossos.round, nossos.date, nossos.home, nossos.away], [1, '2026-09-26', 'GD S. Cristovão', 'Desp. Ronfe']);
+  });
+});

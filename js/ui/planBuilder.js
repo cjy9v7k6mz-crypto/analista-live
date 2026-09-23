@@ -374,12 +374,14 @@ const PlanBuilderScreen = {
         // O histórico de cada item vem dos jogos já terminados contra este
         // adversário — este jogo, por jogar, não entra.
         let trackRecord = new Map();
+        let history = [];
         if (oppId) {
           const past = (await DB.getAll(DB.STORES.matches))
             .filter((x) => x.id !== this.match.id && x.teams?.opponent?.teamId === oppId);
           const entries = [];
           for (const x of past) entries.push({ match: x, occurrences: await AppState.getOccurrences(x.id) });
           trackRecord = MatchStats.scoutingTrackRecord(entries);
+          history = entries;
         }
         await PDFBriefing.generate({
           match: this.match,
@@ -389,6 +391,7 @@ const PlanBuilderScreen = {
           ownPlayers: ownId ? await AppState.getTeamPlayers(ownId) : [],
           opponentPlayers: oppId ? await AppState.getTeamPlayers(oppId) : [],
           trackRecord,
+          history,
         });
         toast('Briefing gerado');
       } catch (err) {

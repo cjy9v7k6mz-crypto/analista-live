@@ -773,6 +773,46 @@ const MatchStats = {
     return out;
   },
 
+  /**
+   * Histórico direto contra um adversário, do NOSSO ponto de vista.
+   *
+   * O dossiê diz o que eles fazem; isto diz como correu quando os enfrentámos.
+   * Serve o briefing: antes de jogar outra vez, ver o que aconteceu das últimas
+   * vezes — resultado e quantas das previsões do scouting se confirmaram.
+   *
+   * @param {string} opponentTeamId
+   * @param {Array<{match, occurrences}>} entries
+   */
+  headToHead(opponentTeamId, entries) {
+    const rows = (entries || [])
+      .filter((e) => e && e.match && e.match.status === 'finished')
+      .map(({ match, occurrences }) => {
+        // Podemos ter sido a equipa "own" ou a "opponent" no registo do jogo.
+        const somosOwn = match.teams?.opponent?.teamId === opponentTeamId;
+        const nossos = somosOwn ? (match.score?.team ?? 0) : (match.score?.opponent ?? 0);
+        const deles = somosOwn ? (match.score?.opponent ?? 0) : (match.score?.team ?? 0);
+        const sc = this.scoutingCheck(match, occurrences || []);
+        return {
+          matchId: match.id,
+          date: match.date || '',
+          competition: match.competition || '',
+          ourGoals: nossos, theirGoals: deles,
+          result: nossos > deles ? 'V' : (nossos === deles ? 'E' : 'D'),
+          confirmed: sc.confirmed.length, tracked: sc.total,
+        };
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+    const totals = rows.reduce((t, r) => {
+      t.played++;
+      if (r.result === 'V') t.wins++; else if (r.result === 'E') t.draws++; else t.losses++;
+      t.goalsFor += r.ourGoals; t.goalsAgainst += r.theirGoals;
+      return t;
+    }, { played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0 });
+
+    return { rows, totals };
+  },
+
   /** Frase curta do histórico de um item ('' se nunca esteve num plano de jogo terminado). */
   trackRecordLabel(rec) {
     if (!rec || !rec.tracked) return '';

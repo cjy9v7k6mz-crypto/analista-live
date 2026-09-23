@@ -4,7 +4,7 @@
  * plano (stale-while-revalidate) para os ficheiros da aplicação.
  */
 
-const CACHE_VERSION = 'analista-live-v34';
+const CACHE_VERSION = 'analista-live-v35';
 const ASSETS = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const ASSETS = [
   './js/vendor/pdf-lib.min.js',
   './js/data/defaultLibrary.js',
   './js/data/formationPresets.js',
+  './js/data/competitions.js',
   './js/data/scoutingModel.js',
   './js/core/utils.js',
   './js/core/crashGuard.js',
@@ -30,6 +31,9 @@ const ASSETS = [
   './js/core/seasonTrends.js',
   './js/core/playerReport.js',
   './js/core/squadLoad.js',
+  './js/core/standings.js',
+  './js/core/adjustmentEffect.js',
+  './js/core/liveAlerts.js',
   './js/core/scoutingFeedback.js',
   './js/core/videoSync.js',
   './js/sync/syncCore.js',
@@ -42,6 +46,7 @@ const ASSETS = [
   './js/export/pdfScouting.js',
   './js/export/pdfPlayer.js',
   './js/export/pdfBriefing.js',
+  './js/export/matchCard.js',
   './js/ui/dashboard.js',
   './js/ui/newGame.js',
   './js/ui/planBuilder.js',
@@ -59,6 +64,7 @@ const ASSETS = [
   './js/ui/teamProfile.js',
   './js/ui/trendChart.js',
   './js/ui/squadStats.js',
+  './js/ui/competition.js',
   './js/ui/scouting.js',
   './js/ui/scoutingHub.js',
   './js/ui/rosterImport.js',

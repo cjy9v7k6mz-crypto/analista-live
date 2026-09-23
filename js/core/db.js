@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'analista_live_db';
-const DB_VERSION = 4; // v4: sincronização multi-dispositivo (sessões, fila, mensagens)
+const DB_VERSION = 5; // v5: competições (classificação e calendário)
 
 const STORES = {
   matches: 'matches',           // 1 registo por jogo (inclui plano, resultado, metadata)
@@ -22,6 +22,7 @@ const STORES = {
   syncQueue: 'syncQueue',       // fila de saída (offline-first): o que falta enviar
   syncApplied: 'syncApplied',   // ids já aplicados vindos de fora (deduplicação)
   messages: 'messages',         // comunicação analista -> banco
+  competitions: 'competitions', // provas: equipas, calendário e resultados (a classificação é calculada)
 };
 
 let _dbPromise = null;
@@ -99,6 +100,9 @@ function openDB() {
       if (!db.objectStoreNames.contains(STORES.messages)) {
         const s = db.createObjectStore(STORES.messages, { keyPath: 'id' });
         s.createIndex('matchId', 'matchId');
+      }
+      if (!db.objectStoreNames.contains(STORES.competitions)) {
+        db.createObjectStore(STORES.competitions, { keyPath: 'id' });
       }
     };
 

@@ -9,6 +9,63 @@
  */
 
 const HalftimeScreen = {
+  /** Atalhos para as decisões mais comuns de intervalo. Editáveis à mão. */
+  PRESETS: [
+    'Subir a linha de pressão', 'Baixar o bloco', 'Fechar o corredor central',
+    'Explorar o lado esquerdo', 'Explorar o lado direito', 'Sair a jogar mais curto',
+    'Sair em jogo direto', 'Marcação individual ao 10',
+  ],
+
+  /**
+   * Regista a decisão como ocorrência do jogo (source 'ajuste'), ao minuto 45.
+   * Fica no histórico como tudo o resto — e é o que permite medir o antes/depois.
+   */
+  async saveAdjustment() {
+    const campo = document.getElementById('adj-text');
+    const texto = (campo.value || '').trim();
+    if (!texto) { campo.focus(); return; }
+    const occ = {
+      id: Utils.uid('occ'), matchId: this.match.id, timestamp: Date.now(),
+      period: 'HT', minute: 45, second: 0,
+      category: 'nossa_equipa', categoryLabel: Utils.categoryLabel('nossa_equipa'),
+      eventName: `Ajuste: ${texto}`, eventType: 'neutral', priority: 'important',
+      note: texto, source: 'ajuste', planEventId: null, playerIds: [], team: 'own',
+      meta: { atHalftime: true }, createdAt: Date.now(),
+    };
+    try {
+      await DB.putRetry(DB.STORES.occurrences, occ);
+    } catch (e) {
+      alert(DB.writeErrorText(e));
+      return;
+    }
+    this.occurrences.push(occ);
+    SyncCore.publish('occurrence', 'upsert', occ);
+    campo.value = '';
+    this.renderAdjustments();
+    toast('Ajuste registado');
+  },
+
+  async removeAdjustment(id) {
+    await AppState.deleteOccurrence(id);
+    this.occurrences = this.occurrences.filter((o) => o.id !== id);
+    SyncCore.publish('occurrence', 'delete', { id });
+    this.renderAdjustments();
+  },
+
+  renderAdjustments() {
+    const box = document.getElementById('adj-list');
+    if (!box) return;
+    const lista = this.occurrences.filter((o) => o.source === 'ajuste');
+    if (!lista.length) { box.innerHTML = ''; return; }
+    box.innerHTML = lista.map((o) => `
+      <div class="adj-item">
+        <span>🔧 ${Utils.escapeHtml(o.note || o.eventName)}</span>
+        <button type="button" class="icon-btn" data-adj-del="${o.id}" title="Remover">✕</button>
+      </div>`).join('');
+    box.querySelectorAll('[data-adj-del]').forEach((b) =>
+      b.addEventListener('click', () => this.removeAdjustment(b.dataset.adjDel)));
+  },
+
   async render(root, params) {
     const match = await DB.get(DB.STORES.matches, params.matchId);
     if (!match) { window.location.hash = '#/dashboard'; return; }
@@ -87,6 +144,19 @@ const HalftimeScreen = {
           <p class="muted center">${Utils.escapeHtml(match.team)} · ${Utils.escapeHtml(match.opponent)} — só se mostram as linhas com registos.</p>
         </section>
 
+        <section class="ht-card ht-card-adjust">
+          <h2>🔧 O que vamos mudar na 2ª parte</h2>
+          <p class="muted">Escreve a decisão. Depois do jogo, a app mostra o que mudou a seguir a ela — é a única forma de saber se resultou.</p>
+          <div class="adj-presets" id="adj-presets">
+            ${this.PRESETS.map((t) => `<button type="button" class="btn btn-small adj-preset">${Utils.escapeHtml(t)}</button>`).join('')}
+          </div>
+          <div class="adj-input-row">
+            <input id="adj-text" placeholder="Ex: subir a linha de pressão" autocomplete="off">
+            <button type="button" class="btn btn-primary" id="adj-save">Registar</button>
+          </div>
+          <div id="adj-list"></div>
+        </section>
+
         <section class="ht-card">
           <h2>🎯 O que o scouting previa</h2>
           ${MatchStats.renderScoutingCheckHTML(match, occurrences)}
@@ -109,6 +179,20 @@ const HalftimeScreen = {
         </div>
       </div>
     `;
+
+    // ---------- Ajustes para a 2ª parte ----------
+    this.match = match;
+    this.occurrences = occurrences;
+    this.renderAdjustments();
+    document.querySelectorAll('.adj-preset').forEach((b) => b.addEventListener('click', () => {
+      const campo = document.getElementById('adj-text');
+      campo.value = b.textContent;
+      campo.focus();
+    }));
+    document.getElementById('adj-save').addEventListener('click', () => this.saveAdjustment());
+    document.getElementById('adj-text').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this.saveAdjustment(); }
+    });
 
     document.getElementById('btn-back-live').addEventListener('click', () => { window.location.hash = `#/live/${match.id}`; });
     document.getElementById('btn-start-2nd').addEventListener('click', async () => {

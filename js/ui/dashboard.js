@@ -77,6 +77,10 @@ const DashboardScreen = {
             <span class="dash-tile-icon">📈</span>
             <span class="dash-tile-label">Estatísticas do Plantel</span>
           </button>
+          <button class="dash-tile" data-nav="#/competicao">
+            <span class="dash-tile-icon">🏆</span>
+            <span class="dash-tile-label">Campeonato</span>
+          </button>
           <button class="dash-tile" data-nav="#/games">
             <span class="dash-tile-icon">📄</span>
             <span class="dash-tile-label">Exportações &amp; Backup</span>

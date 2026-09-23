@@ -152,6 +152,11 @@ const PostgameScreen = {
         </section>
 
         <section class="once-panel">
+          <h2>🔧 Os ajustes resultaram?</h2>
+          ${AdjustmentEffect.renderHTML(match, occurrences)}
+        </section>
+
+        <section class="once-panel">
           <h2>🔗 Padrões do Jogo</h2>
           ${MatchStats.renderPatternsHTML(occurrences, match, (id) => {
             const p = allPlayers.find((x) => x.id === id);
@@ -211,6 +216,7 @@ const PostgameScreen = {
           <div class="once-actions">
             <button class="btn" id="btn-copy-moments">📋 Copiar Minutos</button>
             <button class="btn" id="btn-copy-summary">📝 Partilhar resumo do jogo</button>
+            <button class="btn" id="btn-match-card">🖼 Cartão do jogo (imagem)</button>
             <button class="btn" id="btn-export-moments">Exportar Momentos (CSV)</button>
           </div>
         </section>
@@ -429,6 +435,26 @@ const PostgameScreen = {
       document.getElementById('vs-calc').addEventListener('click', renderClips);
       if (saved.anchors && Object.keys(saved.anchors).length) renderClips();
     }
+
+    // Cartão do jogo: uma imagem para o grupo do staff, onde um PDF não se abre.
+    document.getElementById('btn-match-card').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      const antes = btn.textContent;
+      btn.textContent = 'A desenhar…';
+      try {
+        const ok = await MatchCard.share(match, occurrences, {
+          nameOf: (id) => { const p = allPlayers.find((x) => x.id === id); return p ? (p.shortName || p.name) : null; },
+        });
+        toast(ok ? 'Cartão do jogo pronto' : 'Partilha cancelada');
+      } catch (err) {
+        CrashGuard.record('cartão', err && err.message, err && err.stack, 'MatchCard', false);
+        alert('Não foi possível criar a imagem: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = antes;
+      }
+    });
 
     document.getElementById('btn-copy-summary').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
