@@ -21,6 +21,9 @@ const NewGameScreen = {
 
   async render(root) {
     this.teams = await AppState.getAllTeams();
+    // Árbitros já conhecidos, para o campo autocompletar em vez de se escrever
+    // o nome outra vez (e com outra grafia, que criaria uma ficha nova).
+    this.referees = await DB.getAll(DB.STORES.referees);
     const own = this.teams.find((t) => t.isOwnTeam);
     this.ownTeamId = own ? own.id : null;
     this.opponentTeamId = null;
@@ -133,6 +136,15 @@ const NewGameScreen = {
           <label class="field"><span>Hora</span><input type="time" id="ng-time"></label>
         </div>
         <label class="field"><span>Observador</span><input id="ng-observer" value="${Utils.escapeHtml(AppState.settings?.analystName || '')}"></label>
+        <label class="field"><span>Árbitro</span>
+          <input id="ng-referee" list="ng-referee-list" placeholder="Nome (sabes pela nomeação)" autocomplete="off">
+          <datalist id="ng-referee-list">${(this.referees || []).map((r) => `<option value="${Utils.escapeHtml(r.name)}"></option>`).join('')}</datalist>
+          <small class="muted">Se já apitou, a ficha dele junta-se sozinha. Podes preencher depois.</small>
+        </label>
+        <div class="field-row">
+          <label class="field"><span>Auxiliar 1</span><input id="ng-ass1" autocomplete="off"></label>
+          <label class="field"><span>Auxiliar 2</span><input id="ng-ass2" autocomplete="off"></label>
+        </div>
         <label class="field"><span>Notas pré-jogo</span><textarea id="ng-notes" rows="2" placeholder="Ideias, alertas táticos..."></textarea></label>
       </div>
 
@@ -267,6 +279,8 @@ const NewGameScreen = {
       time: document.getElementById('ng-time').value || '',
       observer: document.getElementById('ng-observer').value.trim(),
       preNotes: document.getElementById('ng-notes').value.trim(),
+      refereeName: document.getElementById('ng-referee').value.trim(),
+      assistants: [document.getElementById('ng-ass1').value.trim(), document.getElementById('ng-ass2').value.trim()].filter(Boolean),
     };
     this.step = 'confirm';
     this.renderStep();
@@ -353,6 +367,12 @@ const NewGameScreen = {
       time: d.time,
       observer: d.observer,
       preNotes: d.preNotes,
+      // O nome fica guardado no jogo (para os ecrãs e exportações) e o id liga
+      // à ficha do árbitro, que é onde vivem os traços e as notas.
+      referee: d.refereeName || d.assistants.length
+        ? { refereeId: null, name: d.refereeName || '', assistants: d.assistants || [] }
+        : null,
+      stoppage: null,
       status: 'draft',
       score: { team: 0, opponent: 0 },
       currentPeriod: PERIODS.NOT_STARTED,

@@ -53,7 +53,7 @@ const PDFBriefing = {
       note('O plano de observação ainda está vazio.');
     } else {
       const list = focos.length ? focos : plan.slice(0, 8);
-      if (!focos.length) note('Nenhum evento marcado como foco — mostram-se os primeiros do plano.');
+      if (!focos.length) note('Nenhum evento marcado como foco - mostram-se os primeiros do plano.');
       R.table(S, ['Foco', 'Categoria', 'Prioridade', 'Histórico'], list.map((e) => [
         e.name,
         Utils.categoryLabel(e.category),
@@ -85,14 +85,35 @@ const PDFBriefing = {
       note('"Previsões confirmadas" = itens do dossiê que estavam no plano desse jogo e chegaram mesmo a acontecer.');
     }
 
-    R.h1(S, '3. Perfil do adversário');
+    // ---- 3. Árbitro ----
+    if (ctx.referee || ctx.match.referee) {
+      R.h1(S, '3. Árbitro');
+      const nome = ctx.match.referee?.name || (ctx.referee && ctx.referee.name) || '';
+      const aux = (ctx.match.referee?.assistants || []).filter(Boolean);
+      R.text(S, nome + (ctx.referee?.association ? ` · ${ctx.referee.association}` : ''), { size: 12, bold: true });
+      if (aux.length) note(`Auxiliares: ${aux.join(' · ')}`);
+      const tracos = RefereeStats.TRAITS
+        .map((t) => { const v = ctx.referee?.traits?.[t.key]; const o = v && t.options.find((x) => x[0] === v); return o ? o[1] : null; })
+        .filter(Boolean);
+      if (tracos.length) R.text(S, tracos.join(' · '), { size: 10 });
+      S.y -= 4;
+      (RefereeStats.briefingLines(ctx.refereeStats, ctx.refereeAverage) || []).forEach((l) => R.text(S, `- ${l}`, { size: 10 }));
+      const notas = (ctx.referee?.notes || []).slice(-3).reverse();
+      if (notas.length) {
+        S.y -= 4;
+        R.text(S, 'Notas nossas:', { size: 10, bold: true });
+        notas.forEach((n) => R.text(S, `- ${n.text}`, { size: 10 }));
+      }
+    }
+
+    R.h1(S, '4. Perfil do adversário');
     const profile = (ctx.opponentTeam && ctx.opponentTeam.profile) || {};
     const quick = QUICK_PROFILE.map((q) => [q.label, profile[q.key]]).filter((r) => r[1] && String(r[1]).trim());
     if (!quick.length) note('Sem perfil preenchido no scouting desta equipa.');
     else R.table(S, ['Campo', 'Valor'], quick, [0.35, 0.65]);
 
     // ---- 3. O que o dossiê diz ----
-    R.h1(S, '4. O que o dossiê diz');
+    R.h1(S, '5. O que o dossiê diz');
     const sc = (ctx.opponentTeam && ctx.opponentTeam.scouting) || {};
     const rows = [];
     SCOUTING_LISTS.forEach((list) => {
@@ -104,7 +125,7 @@ const PDFBriefing = {
     else R.table(S, ['Tipo', 'Item', 'Histórico'], rows, [0.24, 0.54, 0.22]);
 
     // ---- 4. Jogadores-chave ----
-    R.h1(S, '5. Jogadores-chave do adversário');
+    R.h1(S, '6. Jogadores-chave do adversário');
     const keyPlayers = sc.keyPlayers || [];
     if (!keyPlayers.length) {
       note('Sem jogadores-chave definidos.');
@@ -122,7 +143,7 @@ const PDFBriefing = {
     // ---- 5. Onze previsto ----
     const positions = (m.teams?.own?.positions || []).filter((pos) => pos.playerId);
     if (positions.length) {
-      R.h1(S, '6. Onze previsto');
+      R.h1(S, '7. Onze previsto');
       const byId = new Map((ctx.ownPlayers || []).map((p) => [p.id, p]));
       R.table(S, ['Nº', 'Jogador', 'Posição'], positions.map((pos) => {
         const p = byId.get(pos.playerId);

@@ -383,6 +383,17 @@ const PlanBuilderScreen = {
           trackRecord = MatchStats.scoutingTrackRecord(entries);
           history = entries;
         }
+        // Ficha do árbitro, se o jogo já o tiver: perfil, traços e notas nossas.
+        let referee = null, refereeStats = null, refereeAverage = null;
+        const refId = this.match.referee?.refereeId;
+        if (refId) {
+          referee = await DB.get(DB.STORES.referees, refId);
+          const finished = (await DB.getAll(DB.STORES.matches)).filter((x) => x.status === 'finished' && x.referee);
+          const refEntries = [];
+          for (const x of finished) refEntries.push({ match: x, occurrences: await AppState.getOccurrences(x.id) });
+          refereeStats = RefereeStats.compute(refId, refEntries, ownId);
+          refereeAverage = RefereeStats.average(refEntries, ownId);
+        }
         await PDFBriefing.generate({
           match: this.match,
           planEvents: this.planEvents,
@@ -392,6 +403,7 @@ const PlanBuilderScreen = {
           opponentPlayers: oppId ? await AppState.getTeamPlayers(oppId) : [],
           trackRecord,
           history,
+          referee, refereeStats, refereeAverage,
         });
         toast('Briefing gerado');
       } catch (err) {

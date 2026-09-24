@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'analista_live_db';
-const DB_VERSION = 5; // v5: competições (classificação e calendário)
+const DB_VERSION = 6; // v6: árbitros
 
 const STORES = {
   matches: 'matches',           // 1 registo por jogo (inclui plano, resultado, metadata)
@@ -23,6 +23,7 @@ const STORES = {
   syncApplied: 'syncApplied',   // ids já aplicados vindos de fora (deduplicação)
   messages: 'messages',         // comunicação analista -> banco
   competitions: 'competitions', // provas: equipas, calendário e resultados (a classificação é calculada)
+  referees: 'referees',         // árbitros: identidade e traços (os números são calculados dos jogos)
 };
 
 let _dbPromise = null;
@@ -103,6 +104,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains(STORES.competitions)) {
         db.createObjectStore(STORES.competitions, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORES.referees)) {
+        db.createObjectStore(STORES.referees, { keyPath: 'id' });
       }
     };
 

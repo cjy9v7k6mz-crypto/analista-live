@@ -460,6 +460,20 @@ describe('SeasonTrends — evolução jogo a jogo', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('PlayerReport: a janela do clip não usa travessão (o PDF apaga-o)', () => {
+  it('a janela sai com hífen simples', () => {
+    const m = match({ id: 'M1', date: '2026-05-01', status: 'finished',
+      teams: { own: { teamId: 'T' }, opponent: {} },
+      observationPlan: [{ id: 'pe1', name: 'Foco', isFocus: true }],
+      videoSync: { anchors: { '1T': { occurrenceId: 'o1', videoSeconds: 600 } }, preRoll: 8, postRoll: 5, sources: ['focos'] } });
+    const occs = [occ({ id: 'o1', planEventId: 'pe1', period: '1T', minute: 10, timestamp: 1700000000000, playerIds: ['p1'] })];
+    const sheet = PlayerReport.buildSheet({ player: { id: 'p1', name: 'J1' }, teamId: 'T', entries: [{ match: m, occurrences: occs }] });
+    ok(sheet.video.length > 0, 'devia haver um clip');
+    sheet.video.forEach((v) => ok(!/[\u2013\u2014]/.test(v.window), `janela com travessão: ${v.window}`));
+    ok(/\d+:\d\d-\d+:\d\d/.test(sheet.video[0].window), sheet.video[0].window);
+  });
+});
+
 describe('PlayerReport.buildSheet — ficha individual', () => {
   const entry = (m, occs = []) => ({ match: m, occurrences: occs });
   const game = (i, starters = ['A']) => match({
@@ -1528,5 +1542,115 @@ describe('TeamLink — a mesma equipa com outro nome', () => {
       matches: [{ teams: { opponent: { teamId: drop.id } } }],
     });
     eq([plano.players, plano.matches], [2, 1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('RefereeStats — a ficha do árbitro, calculada dos jogos', () => {
+  const jogo = (id, date, { nossos = 1, deles = 0, faltasNossas = 0, faltasDeles = 0, amarelosNossos = 0, amarelosDeles = 0, refId = 'r1', cards = [], stoppage = null, comoOwn = true } = {}) => {
+    const occs = [];
+    for (let i = 0; i < faltasNossas; i++) occs.push(occ({ source: 'falta', team: comoOwn ? 'own' : 'opponent', minute: 10 + i, meta: { consequences: i < amarelosNossos ? ['yellow'] : [], committedById: 'p1' } }));
+    for (let i = 0; i < faltasDeles; i++) occs.push(occ({ source: 'falta', team: comoOwn ? 'opponent' : 'own', minute: 20 + i, meta: { consequences: i < amarelosDeles ? ['yellow'] : [], committedById: 'x1' } }));
+    return {
+      match: match({
+        id, date, status: 'finished',
+        score: comoOwn ? { team: nossos, opponent: deles } : { team: deles, opponent: nossos },
+        teams: comoOwn ? { own: { teamId: 'NOS' }, opponent: { teamId: 'ELES' } } : { own: { teamId: 'ELES' }, opponent: { teamId: 'NOS' } },
+        cards, stoppage, referee: { refereeId: refId, name: 'Árbitro ' + refId, assistants: [] },
+      }),
+      occurrences: occs,
+    };
+  };
+
+  it('conta faltas e cartões de cada lado, e o nosso registo', () => {
+    const e = [
+      jogo('m1', '2026-09-01', { nossos: 2, deles: 1, faltasNossas: 10, faltasDeles: 5, amarelosNossos: 2, amarelosDeles: 1 }),
+      jogo('m2', '2026-10-01', { nossos: 0, deles: 0, faltasNossas: 8, faltasDeles: 8, amarelosNossos: 1 }),
+    ];
+    const s = RefereeStats.compute('r1', e, 'NOS');
+    eq([s.games, s.wins, s.draws, s.losses], [2, 1, 1, 0]);
+    eq([s.foulsUs, s.foulsThem], [18, 13]);
+    eq([s.yellowsUs, s.yellowsThem], [3, 1]);
+    eq(s.foulShareUs, 58, 'percentagem das faltas contra nós');
+    eq(s.foulsPerCard, 7.75, '31 faltas / 4 cartões');
+  });
+
+  it('conta do lado certo quando fomos registados como equipa "adversária"', () => {
+    const s = RefereeStats.compute('r1', [jogo('m1', '2026-09-01', { nossos: 3, deles: 0, faltasNossas: 4, faltasDeles: 9, comoOwn: false })], 'NOS');
+    eq([s.wins, s.foulsUs, s.foulsThem], [1, 4, 9]);
+  });
+
+  it('só entram jogos terminados e deste árbitro', () => {
+    const outro = jogo('m2', '2026-10-01', { refId: 'r2' });
+    const porJogar = jogo('m3', '2026-11-01');
+    porJogar.match.status = 'live';
+    const s = RefereeStats.compute('r1', [jogo('m1', '2026-09-01'), outro, porJogar], 'NOS');
+    eq(s.games, 1);
+  });
+
+  it('minuto do primeiro cartão: o mais cedo do jogo, venha do cartão ou da falta', () => {
+    const e = [
+      jogo('m1', '2026-09-01', { cards: [{ id: 'c1', playerId: 'p1', color: 'yellow', minute: 30 }], faltasNossas: 1, amarelosNossos: 1 }),
+    ];
+    // A falta com amarelo está ao minuto 10; o cartão em match.cards aos 30.
+    eq(RefereeStats.compute('r1', e, 'NOS').firstCardAvg, 10);
+  });
+
+  it('desconto só conta quando foi registado', () => {
+    const semDesconto = RefereeStats.compute('r1', [jogo('m1', '2026-09-01')], 'NOS');
+    eq(semDesconto.stoppageAvg, null);
+    const com = RefereeStats.compute('r1', [
+      jogo('m1', '2026-09-01', { stoppage: { '1T': 2, '2T': 4 } }),
+      jogo('m2', '2026-10-01', { stoppage: { '1T': 1, '2T': 3 } }),
+    ], 'NOS');
+    eq(com.stoppageAvg, 5, 'média de 6 e 4');
+  });
+
+  it('a confiança da amostra é explícita e honesta', () => {
+    eq(RefereeStats.confidence(1).level, 'insuficiente');
+    eq(RefereeStats.confidence(3).level, 'indicativo');
+    eq(RefereeStats.confidence(6).level, 'razoavel');
+    ok(RefereeStats.confidence(2).text.includes('cedo'));
+  });
+
+  it('o enviesamento fica marcado nos dados, não só no texto', () => {
+    eq(RefereeStats.compute('r1', [jogo('m1', '2026-09-01')], 'NOS').bias, 'so-os-nossos-jogos');
+  });
+
+  it('a média serve de régua e a comparação exige pelo menos dois árbitros', () => {
+    const e = [
+      jogo('m1', '2026-09-01', { faltasNossas: 10, amarelosNossos: 4 }),
+      jogo('m2', '2026-10-01', { refId: 'r2', faltasNossas: 10, amarelosNossos: 1 }),
+    ];
+    const media = RefereeStats.average(e, 'NOS');
+    eq([media.referees, media.games], [2, 2]);
+    const r1 = RefereeStats.compute('r1', e, 'NOS');
+    const c = RefereeStats.compare(r1, media);
+    ok(c && c.cardsPct > 0, 'r1 mostra mais cartões do que a média');
+    // Com um árbitro só, comparar com "a média" é comparar com ele próprio.
+    const so1 = [jogo('m1', '2026-09-01', { amarelosNossos: 3, faltasNossas: 5 })];
+    eq(RefereeStats.compare(RefereeStats.compute('r1', so1, 'NOS'), RefereeStats.average(so1, 'NOS')), null);
+  });
+
+  it('nada do que vai para o PDF usa caracteres que o PDF apaga', () => {
+    // O sanitize do pdf-lib (WinAnsi) apaga travessões e aspas curvas, deixando
+    // espaços duplos. Já aconteceu três vezes; este teste fecha a porta.
+    const proibidos = /[\u2013\u2014\u2018\u2019\u201c\u201d\u2026]/;
+    const vazio = RefereeStats.briefingLines(RefereeStats.compute('r1', [], 'NOS'), null);
+    const cheio = RefereeStats.briefingLines(
+      RefereeStats.compute('r1', [1, 2, 3].map((i) => jogo('m' + i, `2026-0${i}-01`, { faltasNossas: 9, amarelosNossos: 2, stoppage: { '1T': 2, '2T': 3 } })), 'NOS'),
+      null);
+    [...vazio, ...cheio].forEach((l) => ok(!proibidos.test(l), `frase com caractere que o PDF apaga: ${l}`));
+    Object.values(RefereeStats.confidence(1)).concat(Object.values(RefereeStats.confidence(9)))
+      .forEach((v) => ok(typeof v !== 'string' || !proibidos.test(v), v));
+  });
+
+  it('as frases do briefing não afirmam mais do que os dados', () => {
+    const primeiro = RefereeStats.briefingLines(RefereeStats.compute('r1', [], 'NOS'), null);
+    ok(primeiro[0].includes('Primeiro jogo'), primeiro[0]);
+    const e = [1, 2, 3].map((i) => jogo('m' + i, `2026-0${i}-01`, { faltasNossas: 12, faltasDeles: 4, amarelosNossos: 2 }));
+    const linhas = RefereeStats.briefingLines(RefereeStats.compute('r1', e, 'NOS'), RefereeStats.average(e, 'NOS'));
+    ok(linhas.some((l) => /75% das faltas contra n/.test(l)), linhas.join(' | '));
+    ok(linhas.some((l) => /como ele nos apitou/.test(l)), 'o aviso do enviesamento vai sempre');
   });
 });

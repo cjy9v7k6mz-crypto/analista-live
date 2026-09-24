@@ -654,6 +654,50 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
 .history-row.is-unsaved { border-left: 3px solid var(--c-red); }
 .history-unsaved { font-size: 12px; }
 
+/* ---------- Árbitros ---------- */
+.ref-intro { padding: 0 20px; }
+.ref-list { display: flex; flex-direction: column; gap: 8px; padding: 0 20px; }
+.ref-card { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: 14px 16px; cursor: pointer; text-align: left; color: var(--text); }
+.ref-card:hover { background: var(--surface-hover); }
+.ref-name { display: flex; flex-direction: column; font-size: 16px; font-weight: 700; }
+.ref-name small { font-size: 11px; font-weight: 400; color: var(--text-mute); margin-top: 2px; }
+.ref-nums { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); }
+.ref-nums b { font-family: var(--font-mono); color: var(--text); }
+.ref-conf { margin: 0 20px 12px; padding: 10px 14px; border-radius: var(--radius); font-size: 13px; font-weight: 600; }
+.ref-conf.is-insuficiente { background: var(--c-yellow-bg); color: var(--c-yellow); border: 1px solid var(--c-yellow); }
+.ref-conf.is-indicativo { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border-strong); }
+.ref-conf.is-razoavel { background: var(--c-green-bg); color: var(--c-green); border: 1px solid var(--c-green); }
+.ref-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; padding: 0 20px; }
+.ref-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 8px; text-align: center; }
+.ref-tile strong { display: block; font-family: var(--font-mono); font-size: 20px; font-weight: 800; }
+.ref-tile span { font-size: 10px; color: var(--text-mute); text-transform: uppercase; letter-spacing: .03em; }
+.ref-compare { margin: 12px 20px 0; font-size: 14px; font-weight: 600; }
+.ref-screen .pat-note, .ref-screen .section-title { padding: 0 20px; }
+.ref-traits { display: flex; flex-direction: column; gap: 8px; padding: 0 20px; }
+.ref-trait { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ref-trait-label { font-size: 12px; color: var(--text-mute); min-width: 88px; }
+.ref-trait .btn.selected { background: var(--c-blue-bg); border-color: var(--c-blue); color: var(--c-blue); }
+.ref-note-add { display: flex; gap: 8px; padding: 0 20px 8px; }
+.ref-note-add input { flex: 1; background: var(--surface-2); border: 1px solid var(--border-strong);
+  color: var(--text); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 15px; }
+.ref-note { display: flex; align-items: center; gap: 10px; margin: 0 20px 6px; padding: 9px 12px;
+  background: var(--surface); border-left: 3px solid var(--c-purple); border-radius: var(--radius-sm); font-size: 14px; }
+.ref-note span:nth-child(2) { flex: 1; }
+.ref-note-date { font-family: var(--font-mono); font-size: 11px; color: var(--text-mute); }
+.ref-matches { display: flex; flex-direction: column; gap: 6px; padding: 0 20px 20px; }
+.ref-match { display: grid; grid-template-columns: 92px 1fr auto auto; gap: 12px; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 13px; color: var(--text); cursor: pointer; text-align: left; }
+.ref-match:hover { background: var(--surface-hover); }
+.ref-match-score { font-family: var(--font-mono); font-weight: 800; }
+@media (max-width: 620px) {
+  .ref-match { grid-template-columns: 1fr auto; }
+  .ref-match .muted { grid-column: 1 / -1; }
+}
+
 /* ---------- Campeonato ---------- */
 .comp-season { font-size: 13px; color: var(--text-mute); font-family: var(--font-mono); }
 .comp-tabs { display: flex; gap: 8px; padding: 0 20px 12px; }

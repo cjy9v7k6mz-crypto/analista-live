@@ -71,7 +71,9 @@ const PlayerReport = {
         date: match.date || null,
         opponent: SeasonTrends.sideOf(match, teamId) === 'opponent' ? match.team : match.opponent,
         time: VideoSync.formatTime(c.videoSeconds),
-        window: `${VideoSync.formatTime(c.start)}–${VideoSync.formatTime(c.end)}`,
+        // Hífen simples e não travessão: isto vai para a tabela do PDF, e o
+        // sanitize (WinAnsi) apagava o travessão, deixando "19:5220:05".
+        window: `${VideoSync.formatTime(c.start)}-${VideoSync.formatTime(c.end)}`,
         name: c.name,
         note: c.note,
         gameLabel: c.gameLabel,
