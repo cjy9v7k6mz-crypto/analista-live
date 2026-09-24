@@ -1439,3 +1439,94 @@ describe('Standings.fromSeed — a prova real do ficheiro', () => {
     eq([nossos.round, nossos.date, nossos.home, nossos.away], [1, '2026-09-26', 'GD S. Cristovão', 'Desp. Ronfe']);
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('TeamLink — a mesma equipa com outro nome', () => {
+  const eq2 = (nome, extra = {}) => ({ id: 't_' + TeamLink.normalize(nome), name: nome, scouting: {}, profile: {}, ...extra });
+
+  it('tira a sigla para comparar: "GD Selho" e "Selho" são a mesma', () => {
+    eq(TeamLink.coreName('GD Selho'), 'selho');
+    eq(TeamLink.coreName('Desp. Ronfe'), 'ronfe');
+    eq(TeamLink.coreName('Desportivo de Ronfe'), 'ronfe');
+    eq(TeamLink.similarity('GD Selho', 'Selho').score, 0.9);
+    eq(TeamLink.similarity('Desp. Ronfe', 'Desportivo de Ronfe').score, 0.9);
+  });
+
+  it('"Juv." não é sigla descartável — dois clubes da mesma terra não se juntam', () => {
+    eq(TeamLink.similarity('Desp. Ronfe', 'Juv. Ronfe').score, 0, 'nem como sugestão');
+    eq(TeamLink.similarity('Operário Campelos', 'Operário Famalicão').score, 0);
+  });
+
+  it('só liga sozinha o que é exatamente igual (acentos e pontos à parte)', () => {
+    ok(TeamLink.isExact(eq2('Caç. Taipas'), 'Cac. Taipas'));
+    eq(TeamLink.isExact(eq2('Selho'), 'GD Selho'), false, 'parecido não é igual: tem de ser confirmado');
+  });
+
+  it('um apelido guardado passa a valer como nome', () => {
+    const t = eq2('Selho', { aliases: ['GD Selho'] });
+    ok(TeamLink.isExact(t, 'GD Selho'), 'depois de confirmado, liga sozinho');
+  });
+
+  it('nomes só parecidos não são propostos — resolvem-se à mão', () => {
+    // "Campelos" e "Operário Campelos" podem ser a mesma equipa, mas a app não
+    // arrisca: não propõe, e fica a ligação manual para isso.
+    eq(TeamLink.similarity('Operário Campelos', 'Campelos').score, 0);
+    eq(TeamLink.similarity('Pica', 'Picanheira').score, 0);
+  });
+
+  it('escolhe o melhor candidato e ignora os excluídos', () => {
+    const teams = [eq2('Selho'), eq2('GD Santo Estêvão'), eq2('Pica')];
+    const c = TeamLink.bestCandidate('GD Selho', teams);
+    eq([c.team.name, c.score], ['Selho', 0.9]);
+    eq(TeamLink.bestCandidate('GD Selho', teams, { exclude: [c.team.id] }), null);
+    eq(TeamLink.bestCandidate('Cabeceirense', teams), null, 'sem parecença, não inventa');
+  });
+
+  it('ficha vazia vs ficha com informação', () => {
+    const vazia = eq2('GD Selho');
+    const cheia = eq2('Selho', { scouting: { weaknesses: [{ id: 'w1', title: 'x' }] } });
+    ok(TeamLink.isEmptyTeam(vazia, { players: [], matches: [] }));
+    eq(TeamLink.isEmptyTeam(cheia, { players: [], matches: [] }), false, 'tem dossiê');
+    eq(TeamLink.isEmptyTeam(vazia, { players: [{ teamId: vazia.id }], matches: [] }), false, 'tem plantel');
+    eq(TeamLink.isEmptyTeam(vazia, { players: [], matches: [{ teams: { opponent: { teamId: vazia.id } } }] }), false, 'tem jogos');
+  });
+
+  it('reconcile: propõe fundir quando a prova criou uma ficha vazia ao lado da minha', () => {
+    const vazia = eq2('GD Selho');
+    const minha = eq2('Selho', { scouting: { notes: [{ id: 'n1', text: 'pré-época' }] } });
+    const comp = { teams: ['GD Selho', 'Cabeceirense'], teamIds: { 'GD Selho': vazia.id } };
+    const r = TeamLink.reconcile(comp, [vazia, minha], { players: [], matches: [] });
+    eq(r.length, 1);
+    eq([r[0].kind, r[0].name, r[0].candidate.team.name], ['fundir', 'GD Selho', 'Selho']);
+  });
+
+  it('reconcile: propõe ligar quando o nome da prova ainda não tem equipa', () => {
+    const minha = eq2('Selho', { scouting: { notes: [{ id: 'n1', text: 'x' }] } });
+    const r = TeamLink.reconcile({ teams: ['GD Selho'], teamIds: {} }, [minha], {});
+    eq([r[0].kind, r[0].candidate.team.name], ['ligar', 'Selho']);
+  });
+
+  it('reconcile: não mexe no que já está bem ligado', () => {
+    const minha = eq2('Selho', { aliases: ['GD Selho'], scouting: { notes: [{ id: 'n' }] } });
+    eq(TeamLink.reconcile({ teams: ['GD Selho'], teamIds: { 'GD Selho': minha.id } }, [minha], {}).length, 0);
+  });
+
+  it('fundir dossiês junta as listas e guarda o nome perdido como apelido', () => {
+    const keep = eq2('Selho', { scouting: { weaknesses: [{ id: 'a' }], notes: [] } });
+    const drop = eq2('GD Selho', { scouting: { weaknesses: [{ id: 'b' }], threats: [{ id: 'c' }] } });
+    TeamLink.mergeScouting(keep, drop);
+    eq(keep.scouting.weaknesses.map((x) => x.id), ['a', 'b'], 'nada se perde');
+    eq(keep.scouting.threats.map((x) => x.id), ['c']);
+    eq(keep.aliases, ['GD Selho']);
+    ok(TeamLink.isExact(keep, 'GD Selho'), 'a partir de agora responde pelos dois nomes');
+  });
+
+  it('o plano de fusão diz o que vai mudar antes de mudar', () => {
+    const keep = eq2('Selho'), drop = eq2('GD Selho');
+    const plano = TeamLink.mergePlan(keep, drop, {
+      players: [{ teamId: drop.id }, { teamId: drop.id }, { teamId: keep.id }],
+      matches: [{ teams: { opponent: { teamId: drop.id } } }],
+    });
+    eq([plano.players, plano.matches], [2, 1]);
+  });
+});

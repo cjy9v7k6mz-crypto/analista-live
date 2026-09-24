@@ -687,6 +687,24 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
 .comp-form.is-E { background: var(--text-mute); }
 .comp-form.is-D { background: var(--c-red); color: #fff; }
 
+.comp-pending { display: flex; align-items: center; gap: 12px; margin: 0 20px 12px; padding: 12px 14px;
+  background: var(--c-yellow-bg); border: 1px solid var(--c-yellow); color: var(--c-yellow);
+  border-radius: var(--radius); font-size: 13px; font-weight: 600; }
+.comp-pending span { flex: 1; line-height: 1.4; }
+.pend-row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 10px; }
+.pend-row.is-done { opacity: .6; }
+.pend-names { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pend-official, .pend-mine { display: flex; flex-direction: column; font-weight: 700; font-size: 15px; }
+.pend-official small, .pend-mine small { font-weight: 400; font-size: 11px; color: var(--text-mute); margin-top: 2px; }
+.pend-mine { color: var(--c-blue); }
+.pend-arrow { color: var(--text-mute); font-size: 18px; }
+.pend-why { margin: 8px 0 10px; font-size: 12px; line-height: 1.45; }
+.pend-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pend-actions select, .pend-manual select { background: var(--surface-2); border: 1px solid var(--border-strong);
+  color: var(--text); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 13px; max-width: 260px; }
+.pend-manual { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+
 .comp-round-nav { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 0 20px 12px; }
 .comp-round-nav select { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
   border-radius: var(--radius-sm); padding: 10px 14px; font-size: 15px; font-weight: 600; }
