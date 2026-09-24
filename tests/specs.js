@@ -1654,3 +1654,93 @@ describe('RefereeStats — a ficha do árbitro, calculada dos jogos', () => {
     ok(linhas.some((l) => /como ele nos apitou/.test(l)), 'o aviso do enviesamento vai sempre');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('TeamMerge.duplicates — avisar sozinho quando há duas fichas iguais', () => {
+  const t = (id, name, extra = {}) => ({ id, name, scouting: {}, profile: {}, ...extra });
+
+  it('encontra o par com o mesmo núcleo de nome', () => {
+    const pares = TeamMerge.duplicates([t('a', 'Selho'), t('b', 'GD Selho'), t('c', 'Cabeceirense')]);
+    eq(pares.length, 1);
+    eq([pares[0].a.name, pares[0].b.name], ['Selho', 'GD Selho']);
+  });
+
+  it('não inventa pares entre clubes diferentes da mesma terra', () => {
+    eq(TeamMerge.duplicates([t('a', 'Desp. Ronfe'), t('b', 'Juv. Ronfe')]).length, 0);
+    eq(TeamMerge.duplicates([t('a', 'Operário Campelos'), t('b', 'Operário Famalicão')]).length, 0);
+  });
+
+  it('com uma equipa só não há pares', () => {
+    eq(TeamMerge.duplicates([t('a', 'Selho')]).length, 0);
+    eq(TeamMerge.duplicates([]).length, 0);
+  });
+
+  it('a frase de confirmação diz o que se move e avisa que não se desfaz', () => {
+    const p = { keep: t('a', 'Selho'), drop: t('b', 'GD Selho'), players: 2, matches: 1, scoutingItems: 3, competitions: 1 };
+    const txt = TeamMerge.describe(p);
+    ok(txt.includes('2 jogadores') && txt.includes('1 jogo') && txt.includes('3 registos de dossiê') && txt.includes('1 prova'), txt);
+    ok(txt.includes('não se desfaz'), 'avisa que não é reversível num toque');
+    ok(TeamMerge.describe({ ...p, players: 0, matches: 0, scoutingItems: 0, competitions: 0 }).includes('vazia'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('SetPieceBrief — o dossiê a chegar na bola parada', () => {
+  const item = (title, extra = {}) => ({ id: 't' + Math.random(), title, description: '', category: 'Outro', useAsFocus: false, ...extra });
+  const team = (listas) => ({ id: 'T2', name: 'Eles', scouting: { strengths: [], weaknesses: [], threats: [], opportunities: [], triggers: [], setPieces: [], ...listas } });
+
+  it('traz os itens de bola parada, pela categoria ou pelas palavras', () => {
+    const t = team({ threats: [item('Cantos ao 2º poste'), item('Pressão alta')], weaknesses: [item('Barreira mal formada', { category: 'Bola parada' })] });
+    const itens = SetPieceBrief.dossierItems(t, 'canto');
+    eq(itens.map((i) => i.title), ['Cantos ao 2º poste'], 'a pressão alta não é bola parada; a barreira é de livres');
+  });
+
+  it('num canto não mostra o que é dos livres, e vice-versa', () => {
+    const t = team({ threats: [item('Cantos ao 2º poste'), item('Livres diretos do 10')] });
+    eq(SetPieceBrief.dossierItems(t, 'canto').map((i) => i.title), ['Cantos ao 2º poste']);
+    eq(SetPieceBrief.dossierItems(t, 'falta').map((i) => i.title), ['Livres diretos do 10']);
+  });
+
+  it('os marcados como foco vêm primeiro', () => {
+    const t = team({ threats: [item('Canto curto ensaiado'), item('Canto ao 2º poste', { useAsFocus: true })] });
+    eq(SetPieceBrief.dossierItems(t, 'canto')[0].title, 'Canto ao 2º poste');
+  });
+
+  it('conta o que já aconteceu hoje, e só do lado deles', () => {
+    const cantos = [
+      occ({ id: 'c1', source: 'canto', team: 'opponent' }),
+      occ({ id: 'c2', source: 'canto', team: 'opponent' }),
+      occ({ id: 'c3', source: 'canto', team: 'own' }),
+      occ({ source: 'remate', team: 'opponent', meta: { fromCornerId: 'c1' } }),
+    ];
+    eq(SetPieceBrief.todayCount(cantos, 'canto'), { total: 2, withShot: 1 });
+  });
+
+  it('só conta livres que deram mesmo livre ao adversário', () => {
+    const faltas = [
+      occ({ source: 'falta', team: 'opponent', meta: { consequences: ['freeKick'] } }),
+      occ({ source: 'falta', team: 'opponent', meta: { consequences: [] } }),
+    ];
+    eq(SetPieceBrief.todayCount(faltas, 'falta').total, 1);
+  });
+
+  it('sem nada a dizer não ocupa ecrã nenhum', () => {
+    eq(SetPieceBrief.html(team({}), [], 'canto'), '');
+    eq(SetPieceBrief.html(null, [], 'canto'), '');
+    // Um canto só e sem dossiê também não justifica caixa.
+    eq(SetPieceBrief.html(team({}), [occ({ source: 'canto', team: 'opponent' })], 'canto'), '');
+  });
+
+  it('com dossiê, o bloco sai com o item e a contagem de hoje', () => {
+    const t = team({ threats: [item('Cantos ao 2º poste', { description: 'o 5 ataca a zona' })] });
+    const html = SetPieceBrief.html(t, [occ({ id: 'c1', source: 'canto', team: 'opponent' }), occ({ id: 'c2', source: 'canto', team: 'opponent' })], 'canto');
+    ok(html.includes('Cantos ao 2º poste') && html.includes('o 5 ataca a zona'), html);
+    ok(html.includes('2 cantos') && html.includes('nenhum com remate'), html);
+  });
+
+  it('a linha do banco é curta e só existe se houver dossiê', () => {
+    eq(SetPieceBrief.line(team({}), [], 'canto'), null);
+    const t = team({ threats: [item('Cantos ao 2º poste')] });
+    ok(SetPieceBrief.line(t, [], 'canto').startsWith('Canto deles'), SetPieceBrief.line(t, [], 'canto'));
+  });
+});

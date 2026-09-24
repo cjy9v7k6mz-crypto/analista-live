@@ -320,6 +320,7 @@ const StatsPanel = {
           <h3>Detalhar Canto <span class="muted">(opcional — já registado)</span></h3>
           <button type="button" class="icon-btn" data-detail-back title="Voltar">✕</button>
         </div>
+        ${side === 'opponent' ? SetPieceBrief.html(this.live.opponentTeam, this.live.occurrences, 'canto') : ''}
         <p class="field-label">Lado</p>
         <div class="stats-team-pick">
           <button class="btn result-btn" data-side="left">Esquerdo</button>
@@ -412,6 +413,7 @@ const StatsPanel = {
           <h3>Detalhar Falta <span class="muted">(opcional — já registada)</span></h3>
           <button type="button" class="icon-btn" data-detail-back title="Voltar">✕</button>
         </div>
+        ${side === 'own' ? SetPieceBrief.html(this.live.opponentTeam, this.live.occurrences, 'falta') : ''}
         <p class="field-label">Localização da falta (toca no campo)</p>
         ${this.miniPitchHTML('foul-loc-pitch', 'foul-loc-dot', side)}
         <p class="field-label">Tipo</p>

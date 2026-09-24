@@ -433,38 +433,17 @@ const CompetitionScreen = {
     toast(`${p.name} criada como equipa nova`);
   },
 
-  /**
-   * Funde `drop` em `keep`: jogadores e jogos passam a apontar para a que fica,
-   * os dossiês juntam-se e o nome perdido fica como apelido. Só depois de tudo
-   * mudado é que a ficha antiga é apagada — se algo falhar a meio, fica tudo
-   * como estava em vez de ficarem jogadores órfãos.
-   */
+  /** Funde duas fichas (ver TeamMerge: a ordem das operações é lá explicada). */
   async mergeTeams(keep, drop) {
-    const jogadores = this._players.filter((p) => p.teamId === drop.id);
-    for (const p of jogadores) {
-      p.teamId = keep.id;
-      await DB.putRetry(DB.STORES.players, p);
-    }
-    const jogos = this._matches.filter((m) => m.teams?.own?.teamId === drop.id || m.teams?.opponent?.teamId === drop.id);
-    for (const m of jogos) {
-      ['own', 'opponent'].forEach((lado) => {
-        if (m.teams?.[lado]?.teamId === drop.id) m.teams[lado].teamId = keep.id;
-        if (m.teamSnapshot?.[lado]?.teamId === drop.id) m.teamSnapshot[lado].teamId = keep.id;
-      });
-      m.updatedAt = Date.now();
-      await DB.putRetry(DB.STORES.matches, m);
-    }
-    TeamLink.mergeScouting(keep, drop);
-    await DB.putRetry(DB.STORES.teams, keep);
-    await DB.delete(DB.STORES.teams, drop.id);
-    // Outras provas que apontassem para a ficha apagada passam a apontar a esta.
-    const provas = await DB.getAll(DB.STORES.competitions);
-    for (const c of provas) {
-      let mexeu = false;
-      Object.keys(c.teamIds || {}).forEach((n) => { if (c.teamIds[n] === drop.id) { c.teamIds[n] = keep.id; mexeu = true; } });
-      if (mexeu) await DB.putRetry(DB.STORES.competitions, c);
-    }
+    await TeamMerge.run(keep.id, drop.id);
     this._teams = this._teams.filter((t) => t.id !== drop.id);
+    // A ficha que fica mudou (apelidos, dossiê) — recarrega para não usar a antiga.
+    const fresca = await DB.get(DB.STORES.teams, keep.id);
+    if (fresca) {
+      const i = this._teams.findIndex((t) => t.id === keep.id);
+      if (i >= 0) this._teams[i] = fresca; else this._teams.push(fresca);
+      Object.assign(keep, fresca);
+    }
   },
 
   /** Id da equipa da app para um nome da prova (null se ainda não ligada). */

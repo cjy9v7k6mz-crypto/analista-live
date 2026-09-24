@@ -166,6 +166,11 @@ const LiveScreen = {
             <button type="button" class="btn btn-lg tc-loss" data-tc="perda">🔴 PERDA</button>
             <button type="button" class="btn btn-lg tc-recover" data-tc="recuperacao">🟢 RECUPERAÇÃO</button>
           </div>
+          <!-- A grelha fica no MESMO ecrã: escolher o tipo e tocar no jogador
+               grava e fecha. Dois toques, em vez dos quatro que isto era
+               (tipo, seletor nosso em modal, seletor deles em modal). -->
+          <p class="field-label" id="tc-who-label">Quem? <span class="muted">(toca no jogador e fica registado)</span></p>
+          <div id="tc-grid"></div>
         </div>
       </dialog>
 
@@ -481,15 +486,53 @@ const LiveScreen = {
     this._bolaOnField = { own, opp };
   },
 
+  /**
+   * Classificar e atribuir num ecrã só.
+   *
+   * Isto era o registo mais caro da app: quatro passos para um acontecimento
+   * que se repete de dez em dez segundos — e o preço era registar metade, ou
+   * perder a jogada seguinte com a cabeça no iPad. O jogador do adversário
+   * deixou de ser perguntado: acrescenta-se depois pelo histórico ("+ jogador")
+   * nas poucas vezes em que interessa.
+   */
   openTransitionClassify(xy) {
     const dlg = document.getElementById('dlg-transition-classify');
     if (!dlg) return;
+    let tipo = null;
+    const { own } = this._bolaOnField || { own: [] };
+
+    const pintarTipo = () => dlg.querySelectorAll('[data-tc]').forEach((b) =>
+      b.classList.toggle('selected', b.dataset.tc === tipo));
+    const grelha = dlg.querySelector('#tc-grid');
+    grelha.innerHTML = PlayerGrid.html({ id: 'tc-players', players: own, unknown: true });
+    dlg.querySelector('#tc-who-label').classList.add('is-waiting');
+
+    const gravar = async (playerId) => {
+      if (!tipo) return;
+      dlg.close();
+      const jogador = playerId ? (own.find((p) => p.id === playerId) || null) : null;
+      await this.saveTransition(tipo, xy, jogador, null);
+      toast(tipo === 'perda' ? '🔴 Perda registada' : '🟢 Recuperação registada');
+    };
+
+    PlayerGrid.bind(dlg, 'tc-players', (id) => gravar(id));
     dlg.querySelector('#tc-cancel').onclick = () => dlg.close();
-    dlg.querySelector('[data-tc="perda"]').onclick = () => { dlg.close(); this.runTransitionFlow('perda', xy); };
-    dlg.querySelector('[data-tc="recuperacao"]').onclick = () => { dlg.close(); this.runTransitionFlow('recuperacao', xy); };
+    dlg.querySelectorAll('[data-tc]').forEach((b) => {
+      b.onclick = () => {
+        tipo = b.dataset.tc;
+        pintarTipo();
+        dlg.querySelector('#tc-who-label').classList.remove('is-waiting');
+      };
+    });
+    pintarTipo();
     dlg.showModal();
   },
 
+  /**
+   * Fluxo antigo, com os dois seletores em modal. Já não é o caminho normal
+   * (ver openTransitionClassify) — fica porque é o que permite identificar
+   * também o jogador do adversário quando isso interessa mesmo.
+   */
   async runTransitionFlow(kind, xy) {
     const { own, opp } = this._bolaOnField || { own: [], opp: [] };
     const ourName = this.match.team;

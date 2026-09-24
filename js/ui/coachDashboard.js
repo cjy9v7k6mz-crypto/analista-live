@@ -155,6 +155,9 @@ const CoachDashboard = {
     const ids = [this.match.teams?.own?.teamId, this.match.teams?.opponent?.teamId].filter(Boolean);
     this.players = [];
     for (const id of ids) this.players.push(...await AppState.getTeamPlayers(id));
+    // Dossiê do adversário: é dele que sai o aviso de bola parada.
+    const oppId = this.match.teams?.opponent?.teamId;
+    this.opponentTeam = oppId ? await DB.get(DB.STORES.teams, oppId) : null;
     this.messages = (await DB.getAllByIndex(DB.STORES.messages, 'matchId', this.match.id))
       .sort((a, b) => b.createdAt - a.createdAt);
   },
@@ -509,7 +512,18 @@ const CoachDashboard = {
     if (!box || !this.match) return;
     const alertas = LiveAlerts.compute(this.match, this.occurrences, this.currentMinute(),
       (id) => this.players.find((p) => p.id === id) || null);
-    box.innerHTML = alertas.slice(0, 3).map((a) => `
+    // Bola parada do adversário acabada de registar: o que o dossiê diz, com o
+    // relógio a correr. Dois minutos de validade — passado isso já não serve.
+    const agora = this.currentMinute();
+    const ultima = [...this.occurrences]
+      .filter((o) => o.team === 'opponent' && (o.source === 'canto' || o.source === 'falta'))
+      .sort((a, b) => b.timestamp - a.timestamp)[0];
+    let bolaParada = null;
+    if (ultima && agora - (ultima.minute ?? 0) <= 2) {
+      const texto = SetPieceBrief.line(this.opponentTeam, this.occurrences, ultima.source);
+      if (texto) bolaParada = `<div class="live-alert is-warn"><span class="live-alert-icon">🎯</span><span>${Utils.escapeHtml(texto)}</span></div>`;
+    }
+    box.innerHTML = (bolaParada || '') + alertas.slice(0, 3).map((a) => `
       <div class="live-alert is-${a.level}">
         <span class="live-alert-icon">${a.icon}</span>
         <span>${Utils.escapeHtml(a.text)}</span>

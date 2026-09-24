@@ -654,6 +654,34 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
 .history-row.is-unsaved { border-left: 3px solid var(--c-red); }
 .history-unsaved { font-size: 12px; }
 
+/* ---------- O dossiê na bola parada ---------- */
+.spb { background: var(--c-yellow-bg); border: 1px solid var(--c-yellow); border-radius: var(--radius);
+  padding: 10px 12px; margin-bottom: 10px; }
+.spb-head { font-size: 12px; font-weight: 800; color: var(--c-yellow); text-transform: uppercase;
+  letter-spacing: .04em; margin-bottom: 6px; }
+.spb-item { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4;
+  color: var(--text); margin-bottom: 4px; }
+.spb-item.is-focus strong { color: var(--c-yellow); }
+.spb-icon { flex-shrink: 0; }
+.spb-today { margin: 6px 0 0; font-size: 12px; color: var(--text-dim); }
+
+/* ---------- Transição em dois toques ---------- */
+.dialog-transition .transition-classify-actions { margin-bottom: 4px; }
+.dialog-transition .tc-loss.selected { background: var(--c-red-bg); border-color: var(--c-red); color: var(--c-red); }
+.dialog-transition .tc-recover.selected { background: var(--c-green-bg); border-color: var(--c-green); color: var(--c-green); }
+#tc-who-label.is-waiting { opacity: .45; }
+
+/* ---------- Juntar equipas ---------- */
+.teams-head-actions { display: flex; gap: 8px; align-items: center; }
+.teams-dupe { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; padding: 12px 14px;
+  background: var(--c-yellow-bg); border: 1px solid var(--c-yellow); color: var(--c-yellow);
+  border-radius: var(--radius); font-size: 13px; }
+.teams-dupe span { flex: 1; line-height: 1.45; }
+.teams-dupe strong { font-weight: 800; }
+.tm-plan { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px; font-size: 13px; line-height: 1.5; margin: 4px 0; }
+.tm-plan p { margin: 0; }
+
 /* ---------- Árbitros ---------- */
 .ref-intro { padding: 0 20px; }
 .ref-list { display: flex; flex-direction: column; gap: 8px; padding: 0 20px; }
