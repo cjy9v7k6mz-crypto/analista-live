@@ -786,7 +786,10 @@ describe('PlayerGrid — grelha de camisolas', () => {
 
 // ---------------------------------------------------------------------------
 describe('CrashGuard — o diário de falhas que o iPad não tem', () => {
+  // Instância isolada: não toca no diário verdadeiro nem deixa lixo no
+  // armazenamento da app (os testes correm na mesma origem que ela).
   const guardado = () => { const g = Object.create(CrashGuard); g.entries = []; g.KEY = 'teste_erros'; return g; };
+  const limpar = () => { try { localStorage.removeItem('teste_erros'); } catch (e) { /* ignora */ } };
   it('sem falhas diz que não há', () => {
     eq(CrashGuard.toText([]), 'Sem falhas registadas.');
   });
@@ -813,6 +816,11 @@ describe('CrashGuard — o diário de falhas que o iPad não tem', () => {
     const g = guardado();
     ok(g.record('erro', null, undefined, undefined, false) !== null);
     ok(typeof g.toText(g.entries) === 'string');
+  });
+
+  it('os próprios testes não deixam lixo no armazenamento da app', () => {
+    limpar();
+    eq(localStorage.getItem('teste_erros'), null);
   });
 });
 

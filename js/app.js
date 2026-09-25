@@ -54,8 +54,10 @@ async function router() {
     const match = hash.match(r.pattern);
     if (match) {
       const params = r.params ? r.params(match) : {};
-      // Se saímos do ecrã LIVE para outro sítio que não live/halftime, paramos o timer local
-      // (os dados já foram persistidos a cada ação — nunca há perda).
+      // O cronómetro NÃO pára ao sair do ecrã LIVE, e é de propósito: o jogo
+      // continua a decorrer no mundo real. Ele conta pela diferença de relógio,
+      // não pelo intervalo, e continua a gravar o estado a cada ~10s enquanto
+      // corre. Quem o pára é o botão de pausa, o intervalo e o Terminar.
       try {
         await r.screen().render(root, params);
       } catch (err) {
