@@ -57,6 +57,40 @@ const LineupState = {
     return { positions, onFieldIds, benchIds, subbedOffIds, statusByPlayerId };
   },
 
+  /**
+   * Troca um titular por um suplente ANTES de o jogo começar.
+   *
+   * Isto é uma CORREÇÃO DO ONZE, não uma substituição: não gasta nenhuma das
+   * substituições do jogo e o jogador que sai fica disponível o resto da
+   * partida. Passar por aqui em vez do fluxo de substituição é o que evita
+   * perder um jogador para sempre por uma troca feita cinco minutos antes do
+   * apito inicial.
+   *
+   * Devolve o alinhamento novo (`starterIds`, `subIds`, `positions`) ou null se
+   * a troca não faz sentido. Não grava nem toca no jogo — quem o faz é o ecrã.
+   */
+  swapStarter(match, side, outId, inId) {
+    const lineup = match && match.teams && match.teams[side];
+    if (!lineup || !outId || !inId || outId === inId) return null;
+    const starterIds = [...(lineup.starterIds || [])];
+    const i = starterIds.indexOf(outId);
+    if (i < 0) return null;                      // quem sai tem de ser titular
+    if (starterIds.includes(inId)) return null;  // quem entra já é titular
+    starterIds[i] = inId;
+
+    // A posição no campo é herdada: quem entra ocupa o lugar de quem sai.
+    const positions = (lineup.positions || []).map((p) => ({ ...p }));
+    const slot = positions.find((p) => p.playerId === outId);
+    if (slot) slot.playerId = inId;
+
+    const subIds = [...(lineup.subIds || [])];
+    const j = subIds.indexOf(inId);
+    if (j >= 0) subIds.splice(j, 1);
+    if (!subIds.includes(outId)) subIds.push(outId);
+
+    return { starterIds, subIds, positions };
+  },
+
   /** Devolve os jogadores de uma equipa anotados com `_onField` e `_status`, ordenados (em campo primeiro, por número). */
   annotatedRoster(match, side, players) {
     const state = this.compute(match, side);

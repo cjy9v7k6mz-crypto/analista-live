@@ -1212,7 +1212,18 @@ const LiveScreen = {
 
     // MAIS (correção de minuto, compensação, cartões, substituições, modo gestão)
     const dlgMore = document.getElementById('dlg-more');
-    document.getElementById('btn-more').addEventListener('click', () => dlgMore.showModal());
+    document.getElementById('btn-more').addEventListener('click', () => {
+      // O rótulo diz o que o botão faz AGORA: antes do apito é uma correção do
+      // onze, não uma substituição. Sem isto, o analista tem de saber de cor
+      // que o comportamento muda — e o preço de se enganar é perder um jogador.
+      const sub = document.getElementById('more-sub');
+      if (sub) {
+        sub.textContent = this.isBeforeKickoff()
+          ? '👥 Corrigir o onze inicial (sem gastar substituição)'
+          : '🔁 Registar substituição';
+      }
+      dlgMore.showModal();
+    });
     document.getElementById('cancel-more').addEventListener('click', () => dlgMore.close());
     document.getElementById('more-correct-time').addEventListener('click', () => {
       const val = prompt('Corrigir minuto (segundos a adicionar/subtrair, ex: -30 ou 45):', '0');
@@ -1255,8 +1266,9 @@ const LiveScreen = {
       // erros como tirar do banco alguém que nunca entrou, ou tirar quem já saiu).
       const ownOnField = LineupState.annotatedRoster(this.match, 'own', this.ownPlayers).filter((p) => p._onField);
       const oppOnField = LineupState.annotatedRoster(this.match, 'opponent', this.opponentPlayers).filter((p) => p._onField);
+      const antesDoApito = this.isBeforeKickoff();
       const sideResult = await PlayerPicker.open({
-        title: 'Substituição — jogador que sai',
+        title: antesDoApito ? 'Corrigir onze — quem sai do onze' : 'Substituição — jogador que sai',
         groups: [
           { label: this.match.team, players: ownOnField },
           { label: this.match.opponent, players: oppOnField },
@@ -1271,13 +1283,15 @@ const LiveScreen = {
       // um jogador que já saiu não pode voltar a entrar.
       const sideState = LineupState.compute(this.match, side);
       const benchPool = LineupState.annotatedRoster(this.match, side, isOwn ? this.ownPlayers : this.opponentPlayers)
-        .filter((p) => !p._onField && !sideState.subbedOffIds.has(p.id));
+        .filter((p) => !p._onField && (antesDoApito || !sideState.subbedOffIds.has(p.id)));
       if (benchPool.length === 0) {
         alert('Não há jogadores disponíveis no banco desta equipa (os que já saíram não podem voltar a entrar).');
         return;
       }
       const inResult = await PlayerPicker.open({
-        title: `Substituição — quem entra por ${outPlayer.shortName || outPlayer.name}`,
+        title: antesDoApito
+          ? `Corrigir onze — quem entra por ${outPlayer.shortName || outPlayer.name}`
+          : `Substituição — quem entra por ${outPlayer.shortName || outPlayer.name}`,
         groups: [{ label: isOwn ? this.match.team : this.match.opponent, players: benchPool }],
         multi: false,
       });
@@ -1372,12 +1386,46 @@ const LiveScreen = {
     if (BenchMessaging._dlg && BenchMessaging._dlg.open) BenchMessaging.renderInbox(this);
   },
 
+  /** O jogo ainda não arrancou? Então mexer no onze é corrigir, não substituir. */
+  isBeforeKickoff() {
+    const p = (AppState.timer && AppState.timer.period) || this.match.currentPeriod;
+    return !p || p === PERIODS.NOT_STARTED;
+  },
+
+  /**
+   * Corrige o onze inicial: troca um titular por um suplente sem registo de
+   * substituição e sem gastar nenhuma. O jogador que sai continua disponível
+   * para todo o jogo.
+   */
+  async correctLineup(side, outPlayer, inPlayer) {
+    const novo = LineupState.swapStarter(this.match, side, outPlayer.id, inPlayer.id);
+    if (!novo) {
+      alert('Não foi possível trocar estes dois jogadores. Quem sai tem de estar no onze e quem entra não pode já estar.');
+      return;
+    }
+    Object.assign(this.match.teams[side], novo);
+    this.match.updatedAt = Date.now();
+    await AppState.persistMatch();
+    this.publishMatchState();
+    this.renderOnzeStrip();
+    this.renderHistory();
+    const entra = inPlayer.shortName || inPlayer.name;
+    const sai = outPlayer.shortName || outPlayer.name;
+    toast(`✅ Onze corrigido: ${entra} por ${sai} (sem substituição gasta)`);
+  },
+
   /**
    * Regista uma substituição (fonte única: só o analista grava). Chamado tanto
    * pelo fluxo manual (⋮ → Registar substituição) como pela confirmação de uma
    * proposta vinda do banco.
    */
   async commitSubstitution(side, outPlayer, inPlayer) {
+    // ANTES DO APITO INICIAL não há substituições: há correções do onze. Sem
+    // isto, uma troca feita cinco minutos antes do jogo gastava uma
+    // substituição E marcava o jogador como "já saiu", perdendo-o para o resto
+    // da partida. Vale tanto para o fluxo manual como para uma proposta do
+    // banco que chegue antes do arranque.
+    if (this.isBeforeKickoff()) return this.correctLineup(side, outPlayer, inPlayer);
     const parts = AppState.timer ? AppState.timer.getGameTimeParts()
       : { period: this.match.currentPeriod || '1T', minute: 0 };
     this.match.substitutions.push({

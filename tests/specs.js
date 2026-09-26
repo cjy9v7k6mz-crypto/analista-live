@@ -291,6 +291,70 @@ describe('LineupState.compute — quem está em campo', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('LineupState.swapStarter — corrigir o onze ANTES do apito', () => {
+  const jogo = () => match({
+    currentPeriod: 'not_started',   // o timer.js não é carregado nos testes; o valor é este
+    teams: {
+      own: {
+        teamId: 'T', starterIds: ['a', 'b', 'c'], subIds: ['x', 'y'],
+        positions: [{ playerId: 'a', x: 50, y: 90, role: 'GR' }, { playerId: 'b', x: 30, y: 60, role: 'MC' }, { playerId: 'c', x: 50, y: 20, role: 'PL' }],
+      },
+      opponent: {},
+    },
+  });
+
+  it('quem entra herda o lugar e quem sai volta ao banco', () => {
+    const m = jogo();
+    const novo = LineupState.swapStarter(m, 'own', 'b', 'x');
+    eq(novo.starterIds, ['a', 'x', 'c'], 'entra no lugar exato do que saiu');
+    eq(novo.subIds, ['y', 'b'], 'quem sai fica no banco e quem entrou sai dele');
+    eq(novo.positions.find((p) => p.playerId === 'x').role, 'MC', 'herda a posição');
+    eq(novo.positions.length, 3);
+  });
+
+  it('não gasta substituição nenhuma nem deixa registo', () => {
+    const m = jogo();
+    const novo = LineupState.swapStarter(m, 'own', 'b', 'x');
+    Object.assign(m.teams.own, novo);
+    eq((m.substitutions || []).length, 0, 'nenhuma substituição registada');
+    // E o mais importante: quem saiu continua disponível para o jogo todo.
+    const estado = LineupState.compute(m, 'own');
+    eq(estado.subbedOffIds.size, 0, 'ninguém marcado como "já saiu"');
+    ok(estado.benchIds.has('b'), 'volta ao banco, disponível');
+    ok(estado.onFieldIds.has('x'));
+  });
+
+  it('a troca pode ser desfeita: trocar de novo devolve o onze inicial', () => {
+    const m = jogo();
+    Object.assign(m.teams.own, LineupState.swapStarter(m, 'own', 'b', 'x'));
+    Object.assign(m.teams.own, LineupState.swapStarter(m, 'own', 'x', 'b'));
+    eq(m.teams.own.starterIds, ['a', 'b', 'c']);
+    eq(m.teams.own.positions.find((p) => p.playerId === 'b').role, 'MC');
+  });
+
+  it('recusa trocas que não fazem sentido', () => {
+    const m = jogo();
+    eq(LineupState.swapStarter(m, 'own', 'x', 'y'), null, 'quem sai tem de ser titular');
+    eq(LineupState.swapStarter(m, 'own', 'a', 'b'), null, 'quem entra não pode já ser titular');
+    eq(LineupState.swapStarter(m, 'own', 'a', 'a'), null, 'o mesmo jogador');
+    eq(LineupState.swapStarter(m, 'own', 'a', null), null);
+    eq(LineupState.swapStarter(m, 'opponent', 'a', 'x'), null, 'lado sem onze');
+  });
+
+  it('funciona com um suplente que não estava na lista do banco', () => {
+    const m = jogo();
+    const novo = LineupState.swapStarter(m, 'own', 'c', 'z');
+    eq(novo.starterIds, ['a', 'b', 'z']);
+    eq(novo.subIds, ['x', 'y', 'c']);
+  });
+
+  it('não mexe no jogo original — devolve, não grava', () => {
+    const m = jogo();
+    LineupState.swapStarter(m, 'own', 'b', 'x');
+    eq(m.teams.own.starterIds, ['a', 'b', 'c'], 'o jogo fica intacto até o ecrã aplicar');
+  });
+});
+
 describe('MatchEffects — desfazer/apagar reverte o que o registo mexeu no jogo', () => {
   it('scoreKeyOf', () => {
     eq(MatchEffects.scoreKeyOf(occ({ source: 'golo', team: 'own' })), 'team');
