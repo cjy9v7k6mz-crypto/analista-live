@@ -55,8 +55,38 @@ const AppState = {
       this.currentMatch.timerSnapshot = this.timer.toSnapshot();
     }
     this.currentMatch.updatedAt = Date.now();
-    await DB.put(DB.STORES.matches, this.currentMatch);
+    await DB.putRetry(DB.STORES.matches, this.currentMatch);
     await DB.put(DB.STORES.settings, { ...this.settings, key: 'app', lastOpenMatchId: this.currentMatch.id });
+    // Qualquer alteração ao jogo segue para o banco. Antes, cada ecrã tinha de
+    // se lembrar de publicar — e bastava esquecer um para o banco ficar com
+    // uma versão antiga (foi o que aconteceu aos cartões: a falta gravava o
+    // cartão no jogo e ninguém o publicava). Agora é o próprio gravar que o
+    // faz, com um atraso curto para não inundar a fila.
+    this.publishMatchSoon();
+  },
+
+  /** Publica já o estado do jogo (usado nos momentos que não podem esperar). */
+  publishMatchNow() {
+    if (!this.currentMatch || !window.SyncCore || !SyncCore.session) return;
+    clearTimeout(this._matchPublishTimer);
+    this._matchPublishTimer = null;
+    this._lastMatchPublish = Date.now();
+    SyncCore.publish('match', 'upsert', SyncCore.lightMatch(this.currentMatch));
+  },
+
+  /** Agenda a publicação: no máximo uma a cada 5 segundos. */
+  publishMatchSoon(delay = 5000) {
+    if (!this.currentMatch || !window.SyncCore || !SyncCore.session) return;
+    const agora = Date.now();
+    if (!this._lastMatchPublish || agora - this._lastMatchPublish >= delay) {
+      this.publishMatchNow();
+      return;
+    }
+    if (this._matchPublishTimer) return;
+    this._matchPublishTimer = setTimeout(() => {
+      this._matchPublishTimer = null;
+      this.publishMatchNow();
+    }, delay - (agora - this._lastMatchPublish));
   },
 
   async setActiveMatch(match) {

@@ -1647,9 +1647,10 @@ const LiveScreen = {
   /** Envia o estado do jogo (resultado, período, cronómetro) para os outros dispositivos. */
   publishMatchState() {
     if (!this.match) return;
-    // Vai sem o teamSnapshot (fotos) — senão o envelope é pesado e pode não
-    // chegar ao banco, deixando o cronómetro e as substituições por atualizar.
-    SyncCore.publish('match', 'upsert', SyncCore.lightMatch(this.match));
+    // Publica JÁ (golo, período, substituição): são os momentos em que o banco
+    // não pode esperar pelo atraso do agendamento. O resto das alterações segue
+    // sozinho pelo `persistMatch` (ver AppState.publishMatchSoon).
+    AppState.publishMatchNow();
   },
 
   async afterScoreChange(side, isCorrection = false) {
