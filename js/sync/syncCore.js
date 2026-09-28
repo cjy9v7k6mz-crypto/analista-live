@@ -36,25 +36,46 @@ const SyncCore = {
     // Identidade de ESTA instância da aplicação. Serve para não aplicarmos o
     // eco dos nossos próprios envios.
     //
-    // Fica em sessionStorage (por separador) e não no IndexedDB: dois
-    // separadores do mesmo browser partilham a base de dados, e se
-    // partilhassem também o identificador cada um ignoraria as mensagens do
-    // outro, julgando serem suas. Em dispositivos distintos o efeito é o
-    // mesmo — identificadores diferentes — mas assim funciona nos dois casos.
+    // FICA NA BASE DE DADOS, não em sessionStorage. Esta linha custou um jogo:
+    // o sessionStorage desaparece quando o iOS mata a app em segundo plano (um
+    // intervalo de 15 minutos com o iPad bloqueado chega), e ao reabrir o
+    // aparelho ganhava um id novo. Deixava de reconhecer os seus PRÓPRIOS
+    // envios como seus e, no `catchUp` da reconexão, reaplicava por cima de si
+    // mesmo tudo o que tinha enviado — placar antigo, cronómetro antigo e a
+    // versão em branco dos remates e faltas.
+    //
+    // O argumento antigo (dois separadores partilhariam o id e ignorar-se-iam)
+    // não se sustenta: dois separadores partilham TAMBÉM a base de dados, por
+    // isso sincronizar entre eles nunca fez sentido nenhum.
+    // Registo PRÓPRIO ('device') e não dentro das definições da app: o
+    // `AppState.saveSettings` grava a sua cópia em memória por cima do registo
+    // inteiro, e levava o identificador à frente na primeira vez que se
+    // mudasse qualquer preferência.
     try {
-      const cached = sessionStorage.getItem('al_instance_id');
-      if (cached) this.deviceId = cached;
-      else {
+      const guardado = await DB.get(DB.STORES.settings, 'device');
+      if (guardado && guardado.deviceId) {
+        this.deviceId = guardado.deviceId;
+      } else {
         this.deviceId = Utils.uid('dev');
-        sessionStorage.setItem('al_instance_id', this.deviceId);
+        await DB.put(DB.STORES.settings, { key: 'device', deviceId: this.deviceId, createdAt: Date.now() });
       }
     } catch (e) {
-      this.deviceId = Utils.uid('dev'); // sessionStorage indisponível: id volátil
+      // Sem base de dados não há sincronização de qualquer maneira; um id
+      // volátil é o menor dos problemas.
+      this.deviceId = Utils.uid('dev');
     }
     // Reenvia o que ficou pendente assim que a rede voltar.
     window.addEventListener('online', () => this.flush());
     window.addEventListener('offline', () => this._setStatus('offline'));
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.flush(); });
+    // Ao voltar ao primeiro plano não basta ENVIAR o que ficou pendente: a
+    // ligação em tempo real morreu enquanto a app esteve em segundo plano, e o
+    // que chegou nesse período nunca foi entregue. Era por isto que o ecrã do
+    // banco congelava a partir do intervalo.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      this.flush();
+      this.resync();
+    });
     // A tabela de deduplicação também tem de ser varrida (ver purgeApplied).
     this.purgeApplied();
   },
@@ -328,7 +349,14 @@ const SyncCore = {
    */
   async receive(env) {
     if (!env || !env.id) return;
-    if (env.deviceId === this.deviceId) return;             // eco do próprio dispositivo
+    if (env.deviceId === this.deviceId) {
+      // Eco do próprio dispositivo. Marcamos como aplicado em vez de
+      // simplesmente ignorar: se este aparelho um dia mudar de identificador,
+      // estes envelopes continuam a ser reconhecidos como já tratados e nunca
+      // voltam a ser escritos por cima do que existe.
+      try { await DB.put(DB.STORES.syncApplied, { id: env.id, at: Date.now() }); } catch (e) { /* ignora */ }
+      return;
+    }
     // Sem sessão ativa não há contexto para aplicar nada. Descartar aqui (e NÃO
     // marcar como aplicado) é essencial: se marcássemos, a deduplicação
     // impediria que estes envelopes voltassem a ser processados quando o
@@ -348,6 +376,35 @@ const SyncCore = {
     this._listeners.forEach((fn) => { try { fn(env); } catch (e) { /* um ouvinte não pode partir os outros */ } });
   },
 
+  /**
+   * Instante em que um registo foi tocado pela última vez. Serve para decidir
+   * quem ganha quando chega uma versão de fora.
+   */
+  _stampOf(rec) {
+    if (!rec) return 0;
+    return rec.updatedAt || rec.createdAt || rec.timestamp || 0;
+  },
+
+  /**
+   * A REGRA QUE FALTAVA: um envelope nunca escreve por cima de um registo local
+   * mais recente.
+   *
+   * Sem isto, qualquer reenvio antigo — e o `catchUp` traz sempre a sessão toda
+   * desde o início — repunha o estado de há meia hora por cima do atual. Foi
+   * assim que um jogo perdeu o placar, o cronómetro e o detalhe dos remates.
+   *
+   * O envelope traz `createdAt` (o instante do envio); o registo local traz o
+   * seu. Empate aplica-se, porque o mais provável é ser exatamente o mesmo
+   * registo.
+   */
+  shouldApply(env, local) {
+    if (!local) return true;                 // não existe cá: aplica
+    const meu = this._stampOf(local);
+    const dele = env && (env.createdAt || this._stampOf(env.payload));
+    if (!meu || !dele) return true;          // sem datas não há como decidir
+    return dele >= meu;
+  },
+
   async _apply(env) {
     const p = env.payload;
     if (env.entityType === 'snapshot') {
@@ -356,7 +413,9 @@ const SyncCore = {
         this.session.matchId = p.match.id;
         await DB.put(DB.STORES.sessions, this.session);
       }
-      if (p.match) await DB.put(DB.STORES.matches, p.match);
+      if (p.match && this.shouldApply(env, await DB.get(DB.STORES.matches, p.match.id))) {
+        await DB.put(DB.STORES.matches, p.match);
+      }
       for (const t of p.teams || []) {
         const existing = await DB.get(DB.STORES.teams, t.id);
         if (!existing) await DB.put(DB.STORES.teams, { ...t, isOwnTeam: false, profile: {}, scouting: null, createdAt: Date.now() });
@@ -365,22 +424,57 @@ const SyncCore = {
         const existing = await DB.get(DB.STORES.players, pl.id);
         if (!existing) await DB.put(DB.STORES.players, pl);
       }
-      for (const o of p.occurrences || []) await DB.put(DB.STORES.occurrences, o);
+      for (const o of p.occurrences || []) {
+        // Uma ocorrência que já cá está detalhada não é substituída pela versão
+        // que ia no instantâneo.
+        const local = await DB.get(DB.STORES.occurrences, o.id);
+        if (!local || this._stampOf(o) >= this._stampOf(local)) await DB.put(DB.STORES.occurrences, o);
+      }
       return;
     }
     if (env.entityType === 'occurrence') {
-      if (env.operation === 'delete') await DB.delete(DB.STORES.occurrences, env.entityId);
-      else await DB.put(DB.STORES.occurrences, p);
+      if (env.operation === 'delete') {
+        // Um apagar antigo não pode levar um registo que foi feito depois dele
+        // (o mesmo id reutilizado, ou um registo reposto à mão).
+        const local = await DB.get(DB.STORES.occurrences, env.entityId);
+        if (this.shouldApply(env, local)) await DB.delete(DB.STORES.occurrences, env.entityId);
+        return;
+      }
+      const local = await DB.get(DB.STORES.occurrences, p && p.id);
+      // É AQUI que se perdiam os remates: o envelope leva a versão em branco do
+      // registo rápido, e o detalhe (jogador, sítio no campo, resultado) é
+      // gravado depois. Sem esta comparação, o branco voltava por cima.
+      if (this.shouldApply(env, local)) await DB.put(DB.STORES.occurrences, p);
       return;
     }
     if (env.entityType === 'match') {
-      // O jogo é sempre do analista: aplicamos tal e qual (fonte única).
-      await DB.put(DB.STORES.matches, p);
+      // O jogo é do analista, mas nem por isso um envio antigo dele pode
+      // desfazer o que já aconteceu a seguir.
+      if (this.shouldApply(env, await DB.get(DB.STORES.matches, p && p.id))) {
+        await DB.put(DB.STORES.matches, p);
+      }
       return;
     }
     if (env.entityType === 'message' || env.entityType === 'moment') {
       await DB.put(DB.STORES.messages, p);
       return;
+    }
+  },
+
+  /**
+   * Volta a ligar-se e vai buscar o que se perdeu. Chamado quando a app volta
+   * ao primeiro plano — é o que faz o ecrã do banco retomar depois do intervalo.
+   */
+  async resync() {
+    if (!this.session || !this.transport) return 0;
+    try {
+      if (typeof this.transport.connect === 'function' && this.status !== 'online') {
+        await this.connect(this.transport);
+        return 0; // o connect já faz catchUp
+      }
+      return await this.catchUp(0);
+    } catch (e) {
+      return 0;
     }
   },
 

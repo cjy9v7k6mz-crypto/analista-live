@@ -85,8 +85,20 @@ const AppState = {
     return DB.delete(DB.STORES.occurrences, id);
   },
 
+  /**
+   * Grava uma ocorrência já existente (o detalhe que vem a seguir ao registo
+   * rápido: jogador, sítio no campo, resultado, consequências).
+   *
+   * Duas coisas que têm de acontecer aqui, e não aconteciam:
+   *  - `updatedAt`: é por ele que a sincronização sabe que esta versão é mais
+   *    recente do que a que foi publicada no instante do registo rápido.
+   *  - publicar: sem isto o detalhe nunca saía do aparelho, e o banco (e
+   *    qualquer reenvio) só conhecia a versão em branco.
+   */
   async updateOccurrence(occurrence) {
-    await DB.put(DB.STORES.occurrences, occurrence);
+    occurrence.updatedAt = Date.now();
+    await DB.putRetry(DB.STORES.occurrences, occurrence);
+    if (window.SyncCore && SyncCore.session) SyncCore.publish('occurrence', 'upsert', occurrence);
     return occurrence;
   },
 

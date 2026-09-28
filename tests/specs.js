@@ -1816,3 +1816,69 @@ describe('SetPieceBrief — o dossiê a chegar na bola parada', () => {
     ok(SetPieceBrief.line(t, [], 'canto').startsWith('Canto deles'), SetPieceBrief.line(t, [], 'canto'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// A REGRA QUE FALTAVA — escrita a partir de um jogo real perdido (26/09/2026).
+//
+// O iPad do analista foi morto pelo iOS durante o intervalo. Ao reabrir ganhou
+// um identificador novo, deixou de reconhecer os seus próprios envios, e o
+// `catchUp` da reconexão trouxe a sessão toda desde o início. Cada envelope
+// antigo foi escrito por cima do estado atual: o placar voltou a 0-1, o
+// cronómetro recuou, e os remates e faltas perderam o jogador e o sítio no
+// campo — porque o que se publica no registo rápido é a versão EM BRANCO, e o
+// detalhe que vem a seguir nunca era publicado.
+describe('SyncCore.shouldApply — um envio antigo nunca desfaz o que veio depois', () => {
+  const envelope = (createdAt, payload) => ({ id: 'e' + createdAt, createdAt, payload });
+
+  it('o que não existe cá é sempre aplicado', () => {
+    eq(SyncCore.shouldApply(envelope(100, { id: 'x' }), null), true);
+    eq(SyncCore.shouldApply(envelope(100, { id: 'x' }), undefined), true);
+  });
+
+  it('um envelope mais novo do que o registo local ganha', () => {
+    eq(SyncCore.shouldApply(envelope(200, {}), { updatedAt: 100 }), true);
+  });
+
+  it('um envelope MAIS ANTIGO do que o registo local é recusado', () => {
+    eq(SyncCore.shouldApply(envelope(100, {}), { updatedAt: 200 }), false, 'era isto que faltava');
+  });
+
+  it('empate aplica-se (é quase de certeza o mesmo registo)', () => {
+    eq(SyncCore.shouldApply(envelope(150, {}), { updatedAt: 150 }), true);
+  });
+
+  it('sem datas não há como decidir: aplica em vez de bloquear', () => {
+    eq(SyncCore.shouldApply({ id: 'e', payload: {} }, { id: 'x' }), true);
+  });
+
+  it('a data do registo local pode vir de updatedAt, createdAt ou timestamp', () => {
+    eq(SyncCore._stampOf({ updatedAt: 3, createdAt: 2, timestamp: 1 }), 3);
+    eq(SyncCore._stampOf({ createdAt: 2, timestamp: 1 }), 2);
+    eq(SyncCore._stampOf({ timestamp: 1 }), 1);
+    eq(SyncCore._stampOf(null), 0);
+  });
+
+  it('o caso real: o remate detalhado não é substituído pela versão em branco', () => {
+    // 15:10 — registo rápido. É esta versão que vai para a sincronização.
+    const branco = { id: 'o1', source: 'remate', playerIds: [], meta: { origin: null, result: null }, createdAt: 1000 };
+    const envioDoRegisto = envelope(1000, branco);
+    // 15:10:20 — o analista detalha: jogador, sítio no campo e resultado.
+    const detalhado = { id: 'o1', source: 'remate', playerIds: ['p10', 'p9'], meta: { origin: { x: 0.5, y: 0.2 }, result: 'goal', passerId: 'p9' }, createdAt: 1000, updatedAt: 1020 };
+    // 15:55 — a app reabre no intervalo e o catchUp traz o envio das 15:10.
+    eq(SyncCore.shouldApply(envioDoRegisto, detalhado), false, 'o branco NÃO volta por cima');
+    // E o detalhe, agora que também é publicado, chega ao banco.
+    eq(SyncCore.shouldApply(envelope(1020, detalhado), branco), true);
+  });
+
+  it('o caso real: o placar de há meia hora não desfaz o de agora', () => {
+    const jogoAntigo = { id: 'M', score: { team: 0, opponent: 1 }, updatedAt: 1000 };
+    const jogoAtual = { id: 'M', score: { team: 1, opponent: 1 }, updatedAt: 3000 };
+    eq(SyncCore.shouldApply(envelope(1000, jogoAntigo), jogoAtual), false, '1-1 não pode voltar a 0-1');
+  });
+
+  it('o caso real: um apagar antigo não leva um registo feito depois', () => {
+    const apagar = { id: 'e', createdAt: 1000, entityId: 'o9', operation: 'delete' };
+    eq(SyncCore.shouldApply(apagar, { id: 'o9', createdAt: 2000 }), false);
+    eq(SyncCore.shouldApply(apagar, { id: 'o9', createdAt: 500 }), true, 'se é mesmo anterior, apaga');
+  });
+});
