@@ -682,6 +682,29 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
   padding: 12px; font-size: 13px; line-height: 1.5; margin: 4px 0; }
 .tm-plan p { margin: 0; }
 
+/* ---------- Cópias de segurança do jogo ---------- */
+.sp-now { margin: 0 0 10px; font-size: 14px; }
+.sp-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+.sp-row { display: grid; grid-template-columns: 92px 1fr auto auto; gap: 12px; align-items: center;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: 10px 12px; }
+.sp-row.is-marked { border-left-color: var(--c-blue); }
+.sp-when { display: flex; flex-direction: column; font-family: var(--font-mono); font-size: 14px; font-weight: 700; }
+.sp-when small { font-family: var(--font); font-size: 10px; font-weight: 400; color: var(--text-mute); margin-top: 2px; }
+.sp-what { display: flex; flex-direction: column; }
+.sp-what strong { font-family: var(--font-mono); font-size: 15px; }
+.sp-what small { font-size: 11px; color: var(--text-mute); }
+.sp-reason { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .03em; }
+.sp-alert { margin: 0 20px 14px; padding: 14px 16px; background: var(--c-red-bg); border: 1px solid var(--c-red);
+  border-radius: var(--radius); }
+.sp-alert-head { font-weight: 800; color: var(--c-red); margin-bottom: 6px; }
+.sp-alert p { margin: 4px 0; font-size: 14px; line-height: 1.45; }
+.sp-alert .btn { margin-top: 8px; }
+@media (max-width: 620px) {
+  .sp-row { grid-template-columns: 1fr auto; }
+  .sp-reason { display: none; }
+}
+
 /* ---------- Árbitros ---------- */
 .ref-intro { padding: 0 20px; }
 .ref-list { display: flex; flex-direction: column; gap: 8px; padding: 0 20px; }

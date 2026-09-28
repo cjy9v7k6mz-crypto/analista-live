@@ -231,6 +231,11 @@ const ExportManager = {
    * dados — trazê-la de um backup antigo podia reenviar eventos velhos ao banco.
    */
   async restoreBackup(data) {
+    // Antes de escrever por cima do que está no aparelho, guarda uma cópia de
+    // cada jogo. Um restauro enganado deixa de ser irreversível.
+    try {
+      for (const m of await DB.getAll(DB.STORES.matches)) await MatchSafety.snapshot(m.id, 'antes de restaurar backup');
+    } catch (e) { /* uma rede de segurança que falha não pode impedir o restauro */ }
     const copy = { ...data };
     [DB.STORES.sessions, DB.STORES.syncQueue, DB.STORES.syncApplied].forEach((k) => { delete copy[k]; });
     await DB.importAll(copy);

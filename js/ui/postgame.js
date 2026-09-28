@@ -93,6 +93,11 @@ const PostgameScreen = {
     const notes = occurrences.filter((o) => o.source === 'nota');
     const momentsForReview = ExportManager.buildMomentsList(occurrences);
 
+    // Verificação automática: as invariantes do jogo têm de bater certo. Se não
+    // baterem, houve estrago — e é melhor dizê-lo aqui do que deixar o analista
+    // descobri-lo no relatório.
+    const problemas = MatchSafety.verify(match, occurrences);
+
     root.innerHTML = `
       <div class="screen postgame-screen">
         <header class="screen-header">
@@ -150,6 +155,8 @@ const PostgameScreen = {
           ${MatchStats.renderScoutingCheckHTML(match, occurrences)}
           ${this.feedbackHTML()}
         </section>
+
+        ${SafetyPanel.problemsHTML(problemas)}
 
         <section class="once-panel">
           <h2>🔧 Os ajustes resultaram?</h2>
@@ -217,6 +224,7 @@ const PostgameScreen = {
             <button class="btn" id="btn-copy-moments">📋 Copiar Minutos</button>
             <button class="btn" id="btn-copy-summary">📝 Partilhar resumo do jogo</button>
             <button class="btn" id="btn-match-card">🖼 Cartão do jogo (imagem)</button>
+            <button class="btn" id="pg-safety">🛟 Cópias de segurança</button>
             <button class="btn" id="btn-export-moments">Exportar Momentos (CSV)</button>
           </div>
         </section>
@@ -262,6 +270,10 @@ const PostgameScreen = {
     `;
 
     this.bindFeedback();
+    document.getElementById('sp-open-safety')?.addEventListener('click', () =>
+      SafetyPanel.open(match.id, () => this.render(document.getElementById('app-root'), params)));
+    document.getElementById('pg-safety')?.addEventListener('click', () =>
+      SafetyPanel.open(match.id, () => this.render(document.getElementById('app-root'), params)));
 
     document.getElementById('btn-copy-moments').addEventListener('click', async () => {
       await ExportManager.copyMomentsToClipboard(momentsForReview);

@@ -36,6 +36,10 @@ const LiveScreen = {
     this.ownPlayers = ownTeamId ? await AppState.getTeamPlayers(ownTeamId) : [];
     this.opponentPlayers = opponentTeamId ? await AppState.getTeamPlayers(opponentTeamId) : [];
 
+    // Cópia do estado com que esta sessão começa: se o ecrã ou a sincronização
+    // estragarem alguma coisa a seguir, este é o ponto de partida seguro.
+    MatchSafety.snapshot(this.match.id, 'ao abrir o jogo');
+
     // Recupera/inicia o cronómetro
     if (AppState.timer) AppState.timer.destroy();
     AppState.timer = new MatchTimer(this.match.timerSnapshot, (state) => this.onTick(state));
@@ -273,6 +277,7 @@ const LiveScreen = {
             <button class="more-item" id="more-card">🟨 Registar cartão</button>
             <button class="more-item" id="more-sub">🔁 Registar substituição</button>
             <button class="more-item" id="more-tactic">♟ Mudança tática</button>
+            <button class="more-item" id="more-safety">🛟 Cópias de segurança deste jogo</button>
             <button class="more-item" id="more-pair">📲 Ligar dispositivo do banco</button>
             <button class="more-item" id="more-mode-manage">🛠 Biblioteca de eventos</button>
             <button class="more-item" id="more-home">🏠 Ir para o início — o jogo continua</button>
@@ -337,6 +342,13 @@ const LiveScreen = {
     // instante de referência guardado é recente e o tempo recuperado é exato.
     if (state.running) {
       const now = Date.now();
+      // Cópia de segurança automática, sem pedir nada a ninguém. Se algo
+      // estragar os dados — um defeito meu, uma sincronização que corre mal —
+      // há sempre um ponto recente para onde voltar.
+      if (!this._lastSnapshot || now - this._lastSnapshot > MatchSafety.INTERVAL_MIN * 60000) {
+        this._lastSnapshot = now;
+        MatchSafety.snapshot(this.match.id, 'automática');
+      }
       if (!this._lastClockPersist || now - this._lastClockPersist > 10000) {
         this._lastClockPersist = now;
         AppState.persistMatch();
@@ -1063,6 +1075,9 @@ const LiveScreen = {
       AppState.timer.pause();
       this.match.currentPeriod = PERIODS.HALF_TIME;
       await AppState.persistMatch();
+      // O intervalo é o momento em que a app costuma ser morta pelo iOS: fica
+      // aqui uma cópia marcada, que nunca é deitada fora pela arrumação.
+      await MatchSafety.snapshot(this.match.id, 'intervalo');
       this.publishMatchState();
       window.location.hash = `#/halftime/${this.match.id}`;
     });
@@ -1074,6 +1089,7 @@ const LiveScreen = {
       this.match.status = 'finished';
       this.match.currentPeriod = PERIODS.FINISHED;
       await AppState.persistMatch();
+      await MatchSafety.snapshot(this.match.id, 'fim do jogo');
       this.publishMatchState();
       window.location.hash = `#/postgame/${this.match.id}`;
     });
@@ -1301,6 +1317,10 @@ const LiveScreen = {
     document.getElementById('more-tactic').addEventListener('click', () => {
       dlgMore.close();
       this.openTacticChange();
+    });
+    document.getElementById('more-safety').addEventListener('click', () => {
+      dlgMore.close();
+      SafetyPanel.open(this.match.id, () => window.location.reload());
     });
     document.getElementById('more-pair').addEventListener('click', () => {
       dlgMore.close();

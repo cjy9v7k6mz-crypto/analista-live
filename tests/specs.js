@@ -1882,3 +1882,71 @@ describe('SyncCore.shouldApply — um envio antigo nunca desfaz o que veio depoi
     eq(SyncCore.shouldApply(apagar, { id: 'o9', createdAt: 500 }), true, 'se é mesmo anterior, apaga');
   });
 });
+
+// ---------------------------------------------------------------------------
+describe('MatchSafety.verify — saber sozinho quando os números deixam de bater', () => {
+  const golo = (team) => occ({ source: 'golo', team, meta: { ownGoal: false } });
+  const jogo = (extra = {}) => match({ score: { team: 1, opponent: 1 }, cards: [], substitutions: [], ...extra });
+
+  it('um jogo coerente não tem problemas nenhuns', () => {
+    eq(MatchSafety.verify(jogo(), [golo('own'), golo('opponent')]), []);
+  });
+
+  it('apanha o placar que não bate com os registos de golo (o caso de 26/09)', () => {
+    const p = MatchSafety.verify(jogo({ score: { team: 0, opponent: 1 } }), [golo('own'), golo('opponent')]);
+    eq(p.map((x) => x.key), ['placar-casa']);
+    ok(p[0].text.includes('0 golos nossos') && p[0].text.includes('1 registos'), p[0].text);
+  });
+
+  it('apanha os dois lados quando ambos estão errados', () => {
+    const p = MatchSafety.verify(jogo({ score: { team: 3, opponent: 4 } }), [golo('own')]);
+    eq(p.map((x) => x.key), ['placar-casa', 'placar-fora']);
+  });
+
+  it('apanha cartões que apontam para uma falta que já não existe', () => {
+    const f = occ({ id: 'f1', source: 'falta' });
+    const bom = MatchSafety.verify(jogo({ cards: [{ id: 'c1', fromFoulId: 'f1', playerId: 'p1' }] }), [golo('own'), golo('opponent'), f]);
+    eq(bom, []);
+    const mau = MatchSafety.verify(jogo({ cards: [{ id: 'c1', fromFoulId: 'f9', playerId: 'p1' }] }), [golo('own'), golo('opponent')]);
+    eq(mau.map((x) => x.key), ['cartoes-orfaos']);
+  });
+
+  it('apanha remates que perderam TODO o detalhe', () => {
+    const vazio = () => occ({ source: 'remate', playerIds: [], meta: { origin: null, result: null } });
+    const p = MatchSafety.verify(jogo(), [golo('own'), golo('opponent'), vazio(), vazio(), vazio()]);
+    eq(p.map((x) => x.key), ['remates-sem-detalhe']);
+    // Mas um remate rápido ainda por detalhar é normal: não alarma.
+    // Atenção ao detalhe: um remate com result 'goal' CONTA como golo, e
+    // desequilibraria o placar deste jogo de teste. Usa-se 'save'.
+    const comUm = MatchSafety.verify(jogo(), [golo('own'), golo('opponent'), vazio(), occ({ source: 'remate', playerIds: ['p1'], meta: { origin: { x: 1, y: 1 }, result: 'save' } })]);
+    eq(comUm, []);
+  });
+
+  it('o autogolo conta para o lado certo', () => {
+    // Um remate do adversário marcado golo conta para eles.
+    const remateGolo = occ({ source: 'remate', team: 'opponent', meta: { result: 'goal' } });
+    eq(MatchSafety.verify(jogo({ score: { team: 0, opponent: 1 } }), [remateGolo]), []);
+  });
+
+  it('sem jogo não rebenta', () => {
+    eq(MatchSafety.verify(null, []), []);
+    eq(MatchSafety.verify(jogo({ score: { team: 0, opponent: 0 } }), null), []);
+  });
+
+  it('a descrição do que se perde ao repor é explícita', () => {
+    const copia = { at: new Date(2026, 8, 26, 16, 47).getTime(), gameLabel: 'intervalo · 45\'', score: { team: 1, opponent: 1 }, counts: { occurrences: 40 } };
+    const txt = MatchSafety.describeRestore(copia, 55);
+    ok(txt.includes('16:47') && txt.includes('intervalo'), txt);
+    ok(txt.includes('1-1'), txt);
+    ok(txt.includes('Perdem-se 15'), txt);
+    ok(txt.includes('fica guardado'), 'diz que dá para voltar');
+    ok(MatchSafety.describeRestore(copia, 30).includes('Recuperam-se 10'));
+    ok(MatchSafety.describeRestore(copia, 40).includes('mesmo'));
+  });
+
+  it('o rótulo do momento do jogo é o que o analista reconhece', () => {
+    eq(MatchSafety.gameLabel({ currentPeriod: 'HT', timerSnapshot: { period: 'HT', periodElapsedMs: 0 } }), 'intervalo · 45\'');
+    eq(MatchSafety.gameLabel({ currentPeriod: 'not_started' }), 'antes do início');
+    ok(MatchSafety.gameLabel({ currentPeriod: '2T', timerSnapshot: { period: '2T', periodElapsedMs: 10 * 60000 } }).includes('55'));
+  });
+});

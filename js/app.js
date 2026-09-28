@@ -117,6 +117,9 @@ async function boot() {
     CrashGuard.record('migração', e && e.message, e && e.stack, 'Migrations.run', false);
     console.warn('Migrações: falha não fatal', e);
   }
+  // Arruma as cópias de jogos antigos (de um jogo com mais de dez dias fica só
+  // a última). Em segundo plano: nunca atrasa o arranque.
+  setTimeout(() => { try { MatchSafety.pruneOld(); } catch (e) { /* ignora */ } }, 4000);
   try {
     await SyncCore.init();
   } catch (e) {
