@@ -69,6 +69,7 @@ const LiveScreen = {
     this.renderFocosStrip();
     this.renderHistory();
     this.renderOnzeStrip();
+    this.renderWarmupStrip();
     this.renderScoreControls();
     this.bindEvents();
     this.updateTopBar();
@@ -105,6 +106,7 @@ const LiveScreen = {
         </header>
 
         <div class="sub-intent-card" id="sub-intent-card" hidden></div>
+        <div class="warmup-strip" id="warmup-strip" hidden></div>
         <div class="onze-strip" id="onze-strip"></div>
         <div class="focos-strip" id="focos-strip"></div>
 
@@ -334,6 +336,12 @@ const LiveScreen = {
   onTick(state) {
     const clock = document.getElementById('live-clock');
     if (clock) clock.textContent = state.gameTimeLabel;
+    // Os minutos de aquecimento andam com o relógio real, não com o do jogo
+    // (quem aquece ao intervalo continua a aquecer). Uma vez por minuto basta.
+    if (Warmup.count(this.match) > 0) {
+      const agoraMin = Math.floor(Date.now() / 60000);
+      if (this._warmPaintedAt !== agoraMin) { this._warmPaintedAt = agoraMin; this.renderWarmupStrip(); }
+    }
     const btnPause = document.getElementById('btn-pause');
     if (btnPause) btnPause.textContent = state.running ? '⏸' : '▶';
 
@@ -409,6 +417,32 @@ const LiveScreen = {
     }
 
     grid.innerHTML = `<div class="event-btn-grid">${sorted.map((e) => this.eventButtonHTML(e, e.isFocus)).join('')}</div>`;
+  },
+
+  /**
+   * Quem está a aquecer, marcado pelo adjunto no banco. O analista não mexe
+   * nisto — só precisa de saber, para não ser apanhado de surpresa pela
+   * substituição e para acompanhar o jogo com os olhos no sítio certo.
+   */
+  renderWarmupStrip() {
+    const strip = document.getElementById('warmup-strip');
+    if (!strip) return;
+    const lista = Warmup.list(this.match);
+    if (lista.length === 0) { strip.innerHTML = ''; strip.hidden = true; return; }
+    const agora = Date.now();
+    const byId = new Map(this.ownPlayers.map((p) => [p.id, p]));
+    strip.hidden = false;
+    strip.innerHTML = `
+      <span class="warmup-strip-tag">🔥 A aquecer</span>
+      <div class="warmup-strip-row">
+        ${lista.map((e) => {
+          const p = byId.get(e.playerId);
+          const nome = p ? `${p.number ? '#' + p.number + ' ' : ''}${Utils.escapeHtml(p.shortName || p.name)}` : 'jogador';
+          return `<span class="warmup-chip warm-${Warmup.state(e, agora)}" data-wp="${e.playerId}">
+            ${nome} <strong>${Warmup.minutes(e, agora)}′</strong>
+          </span>`;
+        }).join('')}
+      </div>`;
   },
 
   // ---------- Faixa recolhível "Meus Focos" ----------
@@ -1088,6 +1122,9 @@ const LiveScreen = {
       AppState.timer.period = PERIODS.FINISHED;
       this.match.status = 'finished';
       this.match.currentPeriod = PERIODS.FINISHED;
+      const fim = Warmup.clear();
+      this.match.warmup = fim.list;
+      this.match.warmupAt = fim.at;
       await AppState.persistMatch();
       await MatchSafety.snapshot(this.match.id, 'fim do jogo');
       this.publishMatchState();
@@ -1304,11 +1341,19 @@ const LiveScreen = {
         alert('Não há jogadores disponíveis no banco desta equipa (os que já saíram não podem voltar a entrar).');
         return;
       }
+      // Quem o banco pôs a aquecer vem primeiro, com os minutos à vista: é a
+      // informação que o adjunto já tem e que o analista não vê do seu lugar.
+      const entram = isOwn
+        ? Warmup.sortBench(this.match, benchPool).map((p) => {
+          const w = Warmup.entry(this.match, p.id);
+          return w ? { ...p, _tag: `🔥 ${Warmup.minutes(w)}′` } : p;
+        })
+        : benchPool;
       const inResult = await PlayerPicker.open({
         title: antesDoApito
           ? `Corrigir onze — quem entra por ${outPlayer.shortName || outPlayer.name}`
           : `Substituição — quem entra por ${outPlayer.shortName || outPlayer.name}`,
-        groups: [{ label: isOwn ? this.match.team : this.match.opponent, players: benchPool }],
+        groups: [{ label: isOwn ? this.match.team : this.match.opponent, players: entram }],
         multi: false,
       });
       if (!inResult || inResult.players.length === 0) return;
@@ -1365,6 +1410,10 @@ const LiveScreen = {
           LiveScreen._onBenchMessage(env.payload);
         } else if (env.entityType === 'sub_intent' && env.payload) {
           LiveScreen._onSubIntent(env.payload);
+        } else if (env.entityType === 'warmup') {
+          // O SyncCore já aplicou o estado (inclusive no jogo em memória);
+          // aqui só se repinta a faixa.
+          LiveScreen.renderWarmupStrip();
         }
       });
     }
@@ -1425,6 +1474,7 @@ const LiveScreen = {
     }
     Object.assign(this.match.teams[side], novo);
     this.match.updatedAt = Date.now();
+    this.clearWarmupFor([inPlayer.id]);
     await AppState.persistMatch();
     this.publishMatchState();
     this.renderOnzeStrip();
@@ -1432,6 +1482,20 @@ const LiveScreen = {
     const entra = inPlayer.shortName || inPlayer.name;
     const sai = outPlayer.shortName || outPlayer.name;
     toast(`✅ Onze corrigido: ${entra} por ${sai} (sem substituição gasta)`);
+  },
+
+  /**
+   * Tira jogadores dos aquecimentos (entraram em campo) e devolve quantos
+   * minutos aqueceu o primeiro deles, para ficar guardado na substituição.
+   */
+  clearWarmupFor(playerIds) {
+    const w = Warmup.remove(this.match, playerIds);
+    if (w.removed.length === 0) return null;
+    this.match.warmup = w.list;
+    this.match.warmupAt = w.at;
+    SyncCore.publish('warmup', 'set', { matchId: this.match.id, list: w.list, at: w.at });
+    this.renderWarmupStrip();
+    return w.removed[0].minutes;
   },
 
   /**
@@ -1448,20 +1512,26 @@ const LiveScreen = {
     if (this.isBeforeKickoff()) return this.correctLineup(side, outPlayer, inPlayer);
     const parts = AppState.timer ? AppState.timer.getGameTimeParts()
       : { period: this.match.currentPeriod || '1T', minute: 0 };
+    // Entrou: deixa de aquecer. O tempo que aqueceu fica guardado — é o que
+    // permite depois perceber quem entrou preparado e quem entrou a frio.
+    const aquecimento = this.clearWarmupFor([inPlayer.id]);
     this.match.substitutions.push({
       id: Utils.uid('sub'), side, outId: outPlayer.id, inId: inPlayer.id,
       out: outPlayer.name, in: inPlayer.name, period: parts.period, minute: parts.minute,
+      warmupMin: aquecimento,
     });
     await this.recordOccurrence({
       eventName: `Substituição: ${outPlayer.shortName || outPlayer.name} → ${inPlayer.shortName || inPlayer.name}`,
       category: 'individual', priority: 'complementary', source: 'substituicao', type: 'neutral',
       playerIds: [outPlayer.id, inPlayer.id],
+      meta: aquecimento === null ? undefined : { warmupMin: aquecimento },
     });
     await AppState.persistMatch();
     this.publishMatchState();
     this.renderHistory();
     this.renderOnzeStrip();
-    toast('Substituição registada');
+    toast(aquecimento === null ? 'Substituição registada'
+      : `Substituição registada · entrou com ${aquecimento}′ de aquecimento`);
   },
 
   /**

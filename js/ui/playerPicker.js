@@ -116,6 +116,7 @@ const PlayerPicker = {
             ${playerAvatar(p, 'lg')}
             <span class="pp-card-num">${p.number ? '#' + p.number : ''}</span>
             <span class="pp-card-name">${Utils.escapeHtml(p.shortName || p.name)}</span>
+            ${p._tag ? `<span class="pp-card-tag">${Utils.escapeHtml(p._tag)}</span>` : ''}
           </button>
         `).join('')}
       </div>

@@ -450,8 +450,41 @@ const SyncCore = {
     if (env.entityType === 'match') {
       // O jogo é do analista, mas nem por isso um envio antigo dele pode
       // desfazer o que já aconteceu a seguir.
-      if (this.shouldApply(env, await DB.get(DB.STORES.matches, p && p.id))) {
-        await DB.put(DB.STORES.matches, p);
+      const localM = await DB.get(DB.STORES.matches, p && p.id);
+      if (this.shouldApply(env, localM)) {
+        // Os aquecimentos são o único estado do jogo que o BANCO também mexe.
+        // Se o que está cá é mais recente do que o que vem no jogo, fica o
+        // nosso — senão o próximo envio do analista apagava o que o adjunto
+        // acabou de marcar.
+        const meus = localM && localM.warmupAt;
+        const dele = p && p.warmupAt;
+        if (meus && (!dele || meus > dele)) {
+          await DB.put(DB.STORES.matches, { ...p, warmup: localM.warmup || [], warmupAt: meus });
+        } else {
+          await DB.put(DB.STORES.matches, p);
+        }
+      }
+      return;
+    }
+    if (env.entityType === 'warmup') {
+      // Quem está a aquecer. Chega dos dois lados (o adjunto marca, o analista
+      // vê), por isso ganha o mais recente. Não toca no `updatedAt` do jogo:
+      // isso é do analista e mexer nele estragava a ordem da sincronização.
+      const alvo = await DB.get(DB.STORES.matches, (p && p.matchId) || (this.session && this.session.matchId));
+      if (!alvo) return;
+      const meus = alvo.warmupAt || 0;
+      const dele = (p && p.at) || env.createdAt || 0;
+      if (dele >= meus) {
+        alvo.warmup = Array.isArray(p && p.list) ? p.list : [];
+        alvo.warmupAt = dele;
+        await DB.put(DB.STORES.matches, alvo);
+        // O analista tem o jogo EM MEMÓRIA; se só escrevêssemos na base de
+        // dados, o próximo `persistMatch` dele apagava por cima o que o banco
+        // acabou de marcar.
+        if (window.AppState && AppState.currentMatch && AppState.currentMatch.id === alvo.id) {
+          AppState.currentMatch.warmup = alvo.warmup;
+          AppState.currentMatch.warmupAt = alvo.warmupAt;
+        }
       }
       return;
     }

@@ -341,12 +341,16 @@ const PDFReport = {
     this.h1(S, '3. Substituições');
     const subs = S.ctx.match.substitutions || [];
     if (!subs.length) return this.empty(S);
+    // "Aquec." é o tempo que o jogador esteve a aquecer antes de entrar, marcado
+    // pelo banco durante o jogo. Fica em branco quando ninguém o marcou.
+    // Plicas simples e não o símbolo de minuto: o WinAnsi do PDF apagava-o.
     const rows = subs.map((s) => [
       `${s.minute}'`,
       s.side === 'own' ? S.ctx.match.team : S.ctx.match.opponent,
       s.out, s.in,
+      typeof s.warmupMin === 'number' ? `${s.warmupMin}'` : '',
     ]);
-    this.table(S, ['Min', 'Equipa', 'Sai', 'Entra'], rows, [0.1, 0.28, 0.31, 0.31]);
+    this.table(S, ['Min', 'Equipa', 'Sai', 'Entra', 'Aquec.'], rows, [0.1, 0.26, 0.28, 0.28, 0.08]);
   },
 
   sectionStats(S) {

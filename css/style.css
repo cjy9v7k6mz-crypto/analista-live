@@ -1589,6 +1589,39 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .sub-intent-move { font-size: 15px; }
 .sub-intent-actions { display: flex; gap: 8px; }
 
+/* ---------- Aquecimentos (banco marca, analista vê) ---------- */
+.coach-warmup { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.coach-warm-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: var(--radius); padding: 9px 10px; min-height: 56px; cursor: pointer; text-align: left; }
+.coach-warm-chip:active { transform: scale(.97); }
+.coach-warm-num { font-size: 11px; font-weight: 800; color: var(--text-mute); }
+.coach-warm-name { font-size: 13px; font-weight: 700; color: var(--text); max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.coach-warm-time { font-size: 11px; font-weight: 700; color: var(--text-mute); }
+.coach-warm-chip.is-on { background: var(--c-yellow-bg); border-color: var(--c-yellow); }
+.coach-warm-chip.is-on .coach-warm-time { color: var(--c-yellow); }
+.coach-warm-chip.warm-pronto { background: var(--c-green-bg); border-color: var(--c-green); }
+.coach-warm-chip.warm-pronto .coach-warm-time { color: var(--c-green); }
+.coach-warm-chip.warm-arrefecer { background: var(--c-red-bg); border-color: var(--c-red); }
+.coach-warm-chip.warm-arrefecer .coach-warm-time { color: var(--c-red); }
+
+.coach-sub-chip.is-warm { border-color: var(--c-yellow); }
+.coach-sub-warm { font-size: 11px; font-weight: 800; color: var(--c-yellow); }
+
+/* Faixa no ecrã do analista: informação, não controlo — ele não marca aquecimentos. */
+.warmup-strip { display: flex; align-items: center; gap: 10px; padding: 5px 16px;
+  background: var(--bg-elevated); border-bottom: 1px solid var(--border); }
+.warmup-strip-tag { font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--c-yellow); white-space: nowrap; }
+.warmup-strip-row { display: flex; gap: 6px; overflow-x: auto; flex: 1; padding: 2px 0; }
+.warmup-chip { background: var(--c-yellow-bg); border: 1px solid var(--c-yellow); color: var(--text);
+  border-radius: 14px; padding: 3px 10px; font-size: 12px; white-space: nowrap; }
+.warmup-chip.warm-pronto { background: var(--c-green-bg); border-color: var(--c-green); }
+.warmup-chip.warm-arrefecer { background: var(--c-red-bg); border-color: var(--c-red); }
+
+.pp-card-tag { font-size: 11px; font-weight: 800; color: var(--c-yellow); }
+
 /* ---------- Estatísticas do Plantel ---------- */
 .ss-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin: 4px 0 14px; }
 .ss-controls .field { min-width: 180px; }

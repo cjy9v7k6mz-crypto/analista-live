@@ -291,6 +291,83 @@ describe('LineupState.compute — quem está em campo', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('Warmup — quem está a aquecer', () => {
+  const T0 = 1700000000000;
+  const jogo = (warmup) => match({ warmup, warmupAt: T0 });
+
+  it('lista saneada: sem repetidos, sem registos estragados, mais antigo primeiro', () => {
+    const m = jogo([
+      { playerId: 'b', since: T0 + 60000 },
+      { playerId: 'a', since: T0 },
+      { playerId: 'a', since: T0 + 5000 },   // repetido: fica o primeiro
+      { playerId: 'c' },                      // sem instante: fora
+      null,
+    ]);
+    eq(Warmup.list(m).map((e) => e.playerId), ['a', 'b']);
+    eq(Warmup.count(m), 2);
+    eq(Warmup.list(match({})), [], 'jogo sem aquecimentos nenhuns');
+  });
+
+  it('minutos e estado são conservadores — ninguém está pronto aos três minutos', () => {
+    const e = { playerId: 'a', since: T0 };
+    eq(Warmup.minutes(e, T0 + 90000), 1, 'arredonda para baixo');
+    eq(Warmup.minutes(e, T0 - 60000), 0, 'nunca negativo');
+    eq(Warmup.state(e, T0 + 60000), 'a-comecar');
+    eq(Warmup.state(e, T0 + 4 * 60000), 'a-aquecer');
+    eq(Warmup.state(e, T0 + Warmup.READY_MIN * 60000), 'pronto');
+    eq(Warmup.state(e, T0 + Warmup.STALE_MIN * 60000), 'arrefecer');
+  });
+
+  it('toggle liga, desliga e não grava nada no jogo', () => {
+    const m = jogo([]);
+    const liga = Warmup.toggle(m, 'a', { minute: 62, now: T0 });
+    eq([liga.added, liga.list.length, liga.at], [true, 1, T0]);
+    eq(m.warmup, [], 'o jogo não é tocado — quem chama é que persiste');
+
+    const m2 = jogo([{ playerId: 'a', since: T0 }]);
+    const desliga = Warmup.toggle(m2, 'a', { now: T0 + 6 * 60000 });
+    eq([desliga.removed, desliga.list.length, desliga.minutes], [true, 0, 6]);
+  });
+
+  it('acima do máximo não acrescenta (e diz que está cheio)', () => {
+    const cheio = jogo(Array.from({ length: Warmup.MAX }, (_, i) => ({ playerId: 'p' + i, since: T0 })));
+    const r = Warmup.toggle(cheio, 'novo', { now: T0 });
+    eq([r.full, r.added, r.list.length], [true, false, Warmup.MAX]);
+  });
+
+  it('quem entra em campo deixa de aquecer, e o tempo fica registado', () => {
+    const m = jogo([{ playerId: 'a', since: T0 }, { playerId: 'b', since: T0 }]);
+    const r = Warmup.remove(m, ['a'], T0 + 9 * 60000);
+    eq(r.list.map((e) => e.playerId), ['b']);
+    eq(r.removed, [{ playerId: 'a', minutes: 9 }]);
+    const nada = Warmup.remove(m, ['z'], T0);
+    eq([nada.removed.length, nada.at], [0, T0], 'ninguém saiu: o instante não muda');
+  });
+
+  it('só aquece quem está no banco e ainda pode entrar', () => {
+    const st = {
+      onFieldIds: new Set(['a']),
+      subbedOffIds: new Set(['b']),
+    };
+    const pool = Warmup.eligible([{ id: 'a' }, { id: 'b' }, { id: 'c' }], st);
+    eq(pool.map((p) => p.id), ['c'], 'quem já saiu não volta a entrar');
+    eq(Warmup.eligible([{ id: 'c' }], null), []);
+  });
+
+  it('os que aquecem aparecem primeiro, e o resto por número', () => {
+    const m = jogo([{ playerId: 'y', since: T0 + 1000 }, { playerId: 'x', since: T0 }]);
+    const ordem = Warmup.sortBench(m, [{ id: 'z', number: 7 }, { id: 'y', number: 14 }, { id: 'w', number: 3 }, { id: 'x', number: 9 }]);
+    eq(ordem.map((p) => p.id), ['x', 'y', 'w', 'z']);
+  });
+
+  it('a faixa do analista mostra nome e minutos', () => {
+    const m = jogo([{ playerId: 'a', since: T0 }]);
+    eq(Warmup.strip(m, [{ id: 'a', number: 14, shortName: 'Silva' }], T0 + 6 * 60000), '#14 Silva 6′');
+    eq(Warmup.strip(match({}), [], T0), '', 'sem ninguém a aquecer não há faixa');
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('LineupState.swapStarter — corrigir o onze ANTES do apito', () => {
   const jogo = () => match({
     currentPeriod: 'not_started',   // o timer.js não é carregado nos testes; o valor é este

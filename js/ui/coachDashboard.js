@@ -222,6 +222,8 @@ const CoachDashboard = {
 
           <aside class="coach-side">
             <button class="btn btn-primary btn-block btn-lg" id="coach-save-moment">⭐ Guardar Momento</button>
+            <h3 class="coach-side-title">🔥 Aquecimentos</h3>
+            <div class="coach-warmup" id="coach-warmup"></div>
             <button class="btn btn-block" id="coach-propose-sub">🔁 Propor substituição</button>
             <div class="coach-sub-status" id="coach-sub-status" hidden></div>
             <button class="btn btn-block" id="coach-talk">📣 Falar com o analista</button>
@@ -352,6 +354,77 @@ const CoachDashboard = {
     });
   },
 
+  // ---------- Aquecimentos ----------
+
+  /**
+   * Quem está a aquecer. É o único estado do jogo que o banco escreve — o
+   * adjunto é quem está ao lado dos jogadores, não o analista. Toque liga,
+   * toque desliga.
+   */
+  renderWarmup() {
+    const box = document.getElementById('coach-warmup');
+    if (!box || !this.match) return;
+    const ownTeamId = this.match.teams?.own?.teamId;
+    const players = this.players.filter((p) => p.teamId === ownTeamId);
+    const state = LineupState.compute(this.match, 'own');
+    const pool = Warmup.sortBench(this.match, Warmup.eligible(players, state));
+    if (pool.length === 0) {
+      box.innerHTML = '<p class="muted">Sem suplentes disponíveis.</p>';
+      return;
+    }
+    const now = Date.now();
+    box.innerHTML = pool.map((p) => {
+      const e = Warmup.entry(this.match, p.id);
+      const st = e ? Warmup.state(e, now) : '';
+      return `
+        <button class="coach-warm-chip ${e ? 'is-on' : ''} ${st ? 'warm-' + st : ''}" data-wplayer="${p.id}">
+          <span class="coach-warm-num">${p.number ? '#' + p.number : ''}</span>
+          <span class="coach-warm-name">${Utils.escapeHtml(p.shortName || p.name)}</span>
+          <span class="coach-warm-time">${e ? Warmup.chipLabel(e, now) : 'aquecer'}</span>
+        </button>`;
+    }).join('');
+    box.querySelectorAll('[data-wplayer]').forEach((b) => {
+      b.addEventListener('click', () => this.toggleWarmup(b.dataset.wplayer));
+    });
+  },
+
+  /**
+   * Só os minutos, sem recriar os botões — o relógio bate a cada segundo e
+   * refazer a grelha tirava o dedo do treinador de cima do botão.
+   */
+  paintWarmupTimes() {
+    if (!this.match) return;
+    const now = Date.now();
+    document.querySelectorAll('#coach-warmup [data-wplayer]').forEach((b) => {
+      const e = Warmup.entry(this.match, b.dataset.wplayer);
+      const t = b.querySelector('.coach-warm-time');
+      if (!t) return;
+      if (!e) { if (b.classList.contains('is-on')) this.renderWarmup(); return; }
+      const novo = Warmup.chipLabel(e, now);
+      if (t.textContent !== novo) {
+        t.textContent = novo;
+        b.className = `coach-warm-chip is-on warm-${Warmup.state(e, now)}`;
+      }
+    });
+  },
+
+  async toggleWarmup(playerId) {
+    if (!this.match || !playerId) return;
+    const r = Warmup.toggle(this.match, playerId, { minute: this.currentMinute() });
+    if (r.full) { this.flash(`Já tens ${Warmup.MAX} a aquecer`); return; }
+    const p = this.players.find((x) => x.id === playerId);
+    const nome = p ? (p.shortName || p.name) : 'jogador';
+    // Escrita local primeiro (o ecrã responde mesmo sem rede), e sem tocar no
+    // `updatedAt` do jogo — esse é do analista.
+    this.match.warmup = r.list;
+    this.match.warmupAt = r.at;
+    try { await DB.put(DB.STORES.matches, this.match); } catch (e) { /* o ecrã continua certo */ }
+    SyncCore.publish('warmup', 'set', { matchId: this.match.id, list: r.list, at: r.at });
+    this.renderWarmup();
+    Utils.vibrate(15);
+    this.flash(r.added ? `🔥 ${nome} a aquecer` : `${nome} deixou de aquecer${r.minutes ? ` (${r.minutes}′)` : ''}`);
+  },
+
   // ---------- Propor substituição ----------
   openSubProposeSheet() {
     const dlg = document.getElementById('dlg-coach-sub');
@@ -363,9 +436,16 @@ const CoachDashboard = {
     const benchPool = players.filter((p) => !state.onFieldIds.has(p.id) && !state.subbedOffIds.has(p.id));
 
     let outId = null; let inId = null;
-    const chip = (p, kind) => `<button class="coach-sub-chip" data-${kind}="${p.id}">${p.number ? '#' + p.number + ' ' : ''}${Utils.escapeHtml(p.shortName || p.name)}</button>`;
+    const agora = Date.now();
+    const chip = (p, kind) => {
+      // Quem está a aquecer aparece primeiro e com os minutos à vista: é a
+      // diferença entre propor um nome e propor um jogador pronto a entrar.
+      const w = kind === 'in' ? Warmup.entry(this.match, p.id) : null;
+      return `<button class="coach-sub-chip ${w ? 'is-warm' : ''}" data-${kind}="${p.id}">${p.number ? '#' + p.number + ' ' : ''}${Utils.escapeHtml(p.shortName || p.name)}${w ? ` <span class="coach-sub-warm">🔥 ${Warmup.minutes(w, agora)}′</span>` : ''}</button>`;
+    };
     dlg.querySelector('#coach-sub-out').innerHTML = onField.length ? onField.map((p) => chip(p, 'out')).join('') : '<p class="muted">Onze não definido.</p>';
-    dlg.querySelector('#coach-sub-in').innerHTML = benchPool.length ? benchPool.map((p) => chip(p, 'in')).join('') : '<p class="muted">Sem suplentes disponíveis.</p>';
+    const entram = Warmup.sortBench(this.match, benchPool, agora);
+    dlg.querySelector('#coach-sub-in').innerHTML = entram.length ? entram.map((p) => chip(p, 'in')).join('') : '<p class="muted">Sem suplentes disponíveis.</p>';
 
     const sendBtn = dlg.querySelector('#coach-sub-send');
     const refresh = () => { sendBtn.disabled = !(outId && inId); };
@@ -873,6 +953,7 @@ const CoachDashboard = {
     // o ecrã do treinador corrige-se sozinho em vez de ficar desatualizado.
     this.timerTick = setInterval(async () => {
       paint();
+      this.paintWarmupTimes();
       if (!this.session?.matchId) return;
       const fresh = await DB.get(DB.STORES.matches, this.session.matchId);
       if (!fresh) return;
@@ -880,7 +961,8 @@ const CoachDashboard = {
         || fresh.currentPeriod !== this.match.currentPeriod
         || fresh.status !== this.match.status
         || fresh.score?.team !== this.match.score?.team
-        || fresh.score?.opponent !== this.match.score?.opponent;
+        || fresh.score?.opponent !== this.match.score?.opponent
+        || fresh.warmupAt !== this.match.warmupAt;
       if (changed) {
         await this.loadData();
         this.repaint();
@@ -906,6 +988,7 @@ const CoachDashboard = {
       this.renderPatterns();
       this.renderAlerts();
       this.renderPeriodSummary();
+      this.renderWarmup();
       return;
     }
     const scroll = document.getElementById('coach-feed')?.scrollTop || 0;
@@ -984,6 +1067,7 @@ const CoachDashboard = {
     this.renderPatterns();
     this.renderAlerts();
     this.renderPeriodSummary();
+    this.renderWarmup();
     if (this._pendingSub) this.renderSubStatus('⏳ Proposta enviada — à espera do analista', 'pending');
     this.paintConnection(SyncCore.status);
   },
@@ -1077,6 +1161,7 @@ const CoachDashboard = {
         this.renderPatterns();
         this.renderAlerts();
         this.renderPeriodSummary();
+        this.renderWarmup();
 
         if (env.entityType === 'occurrence' && env.payload?.source === 'golo') {
           this.flash('⚽ ' + (env.payload.eventName || 'Golo'));
