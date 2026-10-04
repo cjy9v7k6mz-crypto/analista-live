@@ -291,6 +291,90 @@ describe('LineupState.compute — quem está em campo', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('PlayerBoard — como se estão a sair', () => {
+  const jogo = () => match({
+    status: 'finished',
+    teams: { own: { teamId: 'T', starterIds: ['a', 'b'], subIds: ['c', 'd'], positions: [{ playerId: 'a' }, { playerId: 'b' }] }, opponent: { teamId: 'X' } },
+    substitutions: [{ side: 'own', outId: 'b', inId: 'c', minute: 60 }],
+  });
+  const jogadores = [
+    { id: 'a', teamId: 'T', name: 'Um', number: 1 },
+    { id: 'b', teamId: 'T', name: 'Dois', number: 2 },
+    { id: 'c', teamId: 'T', name: 'Tres', number: 3 },
+    { id: 'd', teamId: 'T', name: 'Quatro', number: 4 },
+    { id: 'z', teamId: 'X', name: 'Deles', number: 9 },
+  ];
+
+  it('uma linha por jogador da equipa, quem jogou primeiro', () => {
+    const rows = PlayerBoard.rows({ match: jogo(), occurrences: [], players: jogadores, side: 'own' });
+    eq(rows.map((r) => r.player.id), ['a', 'b', 'c', 'd'], 'o adversário não entra e quem não jogou fica no fim');
+    eq([rows[0].minutes, rows[1].minutes, rows[2].minutes, rows[3].played], [90, 60, 30, false]);
+    eq([rows[1].status, rows[2].status], ['subbed_off', 'sub_in']);
+  });
+
+  it('quem não entrou não leva leitura nenhuma', () => {
+    const r = PlayerBoard.read({}, { played: false });
+    eq([r.level, r.label, r.reasons], ['fora', 'não entrou', []]);
+  });
+
+  it('quem jogou e nada registou não é julgado por isso', () => {
+    const s = PlayerStats.forMatch('a', []);
+    const r = PlayerBoard.read(s, { played: true });
+    eq([r.level, r.label], ['neutro', 'sem registos associados']);
+  });
+
+  it('destaques dão verde e trazem os números à frente', () => {
+    const s = PlayerStats.forMatch('a', []);
+    s.goals = 1; s.shotsOnTarget = 2;
+    const r = PlayerBoard.read(s, { played: true });
+    eq(r.level, 'bom');
+    eq(r.label, '1 golo · 2 remates enquadrados');
+  });
+
+  it('perdas a mais do que recuperações acendem o laranja', () => {
+    const s = PlayerStats.forMatch('a', []);
+    s.perdas = 4; s.recuperacoes = 1;
+    const r = PlayerBoard.read(s, { played: true });
+    eq([r.level, r.label], ['atencao', '4 perdas, 1 recuperação']);
+  });
+
+  it('amarelo com faltas é risco de segundo, e o golo não o apaga', () => {
+    const s = PlayerStats.forMatch('a', []);
+    s.yellow = 1; s.foulsCommitted = 3; s.goals = 1;
+    const r = PlayerBoard.read(s, { played: true });
+    eq(r.level, 'atencao', 'o risco vem primeiro');
+    eq(r.reasons[0], 'amarelo — atenção ao segundo');
+    eq(r.reasons.includes('1 golo'), true, 'o que fez de bom não desaparece');
+  });
+
+  it('um jogador sem onze mas com registos conta na mesma (o caso do adversário)', () => {
+    const s = PlayerStats.forMatch('z', [occ({ source: 'falta', playerIds: ['z'], meta: { committedById: 'z' } })]);
+    const r = PlayerBoard.read(s, { played: false });
+    eq(r.level !== 'fora', true, 'tem registos: não é "não entrou"');
+    const rows = PlayerBoard.rows({ match: jogo(), occurrences: [occ({ source: 'falta', playerIds: ['z'], meta: { committedById: 'z' } })], players: jogadores, side: 'opponent' });
+    eq(rows[0].player.id, 'z');
+    eq([rows[0].played, rows[0].ativo], [false, true]);
+  });
+
+  it('a tabela mostra os jogadores e a nota de que não é uma nota', () => {
+    const rows = PlayerBoard.rows({ match: jogo(), occurrences: [], players: jogadores, side: 'own' });
+    const html = PlayerBoard.tableHTML(rows);
+    eq(html.includes('não é uma nota de desempenho'), true);
+    eq(html.includes('data-pb-player="a"'), true);
+    eq(PlayerBoard.tableHTML([]).includes('Sem jogadores'), true);
+  });
+
+  it('a versão do banco corta as colunas menos usadas', () => {
+    const rows = PlayerBoard.rows({ match: jogo(), occurrences: [], players: jogadores, side: 'own' });
+    const largo = PlayerBoard.tableHTML(rows);
+    const estreito = PlayerBoard.tableHTML(rows, { compact: true });
+    eq(largo.includes('data-pb-sort="saves"'), true);
+    eq(estreito.includes('data-pb-sort="saves"'), false);
+    eq(estreito.includes('data-pb-sort="perdas"'), true, 'as perdas ficam sempre');
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('Warmup — quem está a aquecer', () => {
   const T0 = 1700000000000;
   const jogo = (warmup) => match({ warmup, warmupAt: T0 });

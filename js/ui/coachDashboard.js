@@ -335,7 +335,7 @@ const CoachDashboard = {
         <div class="coach-summary-head">
           <span>${finished ? '⏹ FIM DO JOGO' : '⏱ INTERVALO'}</span>
           <strong>${Utils.escapeHtml(this.match.team)} ${this.match.score.team} - ${this.match.score.opponent} ${Utils.escapeHtml(this.match.opponent)}</strong>
-          <button class="btn btn-tiny" id="coach-summary-collapse">Ver detalhe ▾</button>
+          <button class="btn btn-tiny" id="coach-summary-collapse">Esconder ▴</button>
         </div>
         <div class="coach-summary-grid" id="coach-summary-grid">
           <section><h4>🔴 Problemas</h4>${list(problems, (e) => `<div class="cs-line"><span>${Utils.escapeHtml(e.name)}</span><strong>${e.count}×</strong></div>`)}</section>
@@ -344,13 +344,30 @@ const CoachDashboard = {
           <section><h4>🚨 Banco</h4>${list(bench.slice(-5), (o) => `<div class="cs-line"><span>${String(o.minute).padStart(2, '0')}' ${Utils.escapeHtml(o.eventName)}</span></div>`)}</section>
           <section><h4>⭐ Momentos</h4>${list(moments.slice(-5), (o) => `<div class="cs-line"><span>${String(o.minute).padStart(2, '0')}'</span>${o.note ? `<span class="muted">"${Utils.escapeHtml(o.note)}"</span>` : ''}</div>`)}</section>
         </div>
+        <div class="coach-summary-players" id="coach-summary-players">
+          <h4>👥 Como se estão a sair</h4>
+          <div id="coach-player-board"></div>
+        </div>
       </div>`;
     const grid = box.querySelector('#coach-summary-grid');
+    const jogadores = box.querySelector('#coach-summary-players');
     const btn = box.querySelector('#coach-summary-collapse');
+    // A tabela por jogador é o que o treinador abre primeiro ao intervalo:
+    // fica montada já, e aparece com o resto do detalhe.
+    const ownId = this.match.teams?.own?.teamId;
+    const oppId = this.match.teams?.opponent?.teamId;
+    PlayerBoard.mount(box.querySelector('#coach-player-board'), {
+      match: this.match,
+      occurrences: this.occurrences,
+      ownPlayers: this.players.filter((p) => p.teamId === ownId),
+      opponentPlayers: this.players.filter((p) => p.teamId === oppId),
+      compact: true,
+      linkPlayers: false,
+    });
     btn.addEventListener('click', () => {
       const hidden = grid.hasAttribute('hidden');
-      if (hidden) { grid.removeAttribute('hidden'); btn.textContent = 'Esconder ▴'; }
-      else { grid.setAttribute('hidden', ''); btn.textContent = 'Ver detalhe ▾'; }
+      if (hidden) { grid.removeAttribute('hidden'); jogadores.removeAttribute('hidden'); btn.textContent = 'Esconder ▴'; }
+      else { grid.setAttribute('hidden', ''); jogadores.setAttribute('hidden', ''); btn.textContent = 'Ver detalhe ▾'; }
     });
   },
 

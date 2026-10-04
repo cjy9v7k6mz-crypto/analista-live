@@ -127,6 +127,11 @@ const PostgameScreen = {
         </section>
 
         <section class="once-panel">
+          <h2>👥 Como se saíram os jogadores</h2>
+          <div id="pg-player-board"></div>
+        </section>
+
+        <section class="once-panel">
           <h2>⏱ 1ª Parte vs 2ª Parte</h2>
           ${MatchStats.renderPeriodComparisonHTML(match, occurrences)}
         </section>
@@ -268,6 +273,9 @@ const PostgameScreen = {
         </div>
       </dialog>
     `;
+
+    // Tabela por jogador: os números do jogo e a leitura do que mostram.
+    PlayerBoard.mount(document.getElementById('pg-player-board'), { match, occurrences, ownPlayers, opponentPlayers });
 
     this.bindFeedback();
     document.getElementById('sp-open-safety')?.addEventListener('click', () =>

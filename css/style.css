@@ -1622,6 +1622,39 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 
 .pp-card-tag { font-size: 11px; font-weight: 800; color: var(--c-yellow); }
 
+/* ---------- Tabela por jogador (intervalo, fim do jogo, banco) ---------- */
+.pb-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+.pb-tab { background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 16px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.pb-tab.active { background: var(--c-blue-bg); border-color: var(--c-blue); color: var(--text); }
+.pb-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pb-table th, .pb-table td { padding: 7px 8px; text-align: center; white-space: nowrap; }
+.pb-table thead th { font-size: 11px; font-weight: 800; color: var(--text-dim); text-transform: uppercase;
+  letter-spacing: .03em; border-bottom: 1px solid var(--border-strong); cursor: pointer; user-select: none; }
+.pb-table thead th:hover { color: var(--text); }
+.pb-table th.pb-name, .pb-table td.pb-name { text-align: left; }
+.pb-table tbody th.pb-name { font-weight: 700; position: sticky; left: 0; background: var(--surface); }
+.pb-num { display: inline-block; min-width: 20px; font-size: 11px; font-weight: 800; color: var(--text-mute); }
+.pb-mark { margin-left: 5px; font-size: 10px; }
+.pb-mark.pb-in { color: var(--c-green); }
+.pb-mark.pb-out { color: var(--text-mute); }
+.pb-row { border-bottom: 1px solid var(--border); }
+.pb-row.is-out { opacity: .45; }
+.pb-table th.pb-read, .pb-table td.pb-read { text-align: left; font-size: 12px; color: var(--text-dim);
+  white-space: normal; min-width: 170px; line-height: 1.35; }
+.pb-dot { margin-right: 4px; }
+.pb-row.pb-bom td.pb-read { color: var(--c-green); }
+.pb-row.pb-atencao td.pb-read { color: var(--c-yellow); }
+.pb-note { font-size: 11px; margin-top: 8px; }
+
+.coach-summary-players { margin-top: 12px; }
+.coach-summary-players h4 { margin: 0 0 6px; font-size: 12px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .04em; }
+.coach-summary-players .pb-table { font-size: 12px; }
+.coach-summary-players .pb-table th, .coach-summary-players .pb-table td { padding: 5px 7px; }
+.coach-summary-players tbody th.pb-name { background: var(--bg-elevated); }
+
 /* ---------- Estatísticas do Plantel ---------- */
 .ss-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin: 4px 0 14px; }
 .ss-controls .field { min-width: 180px; }

@@ -144,6 +144,11 @@ const HalftimeScreen = {
           <p class="muted center">${Utils.escapeHtml(match.team)} · ${Utils.escapeHtml(match.opponent)} — só se mostram as linhas com registos.</p>
         </section>
 
+        <section class="ht-card">
+          <h2>👥 Como se estão a sair</h2>
+          <div id="ht-player-board"></div>
+        </section>
+
         <section class="ht-card ht-card-adjust">
           <h2>🔧 O que vamos mudar na 2ª parte</h2>
           <p class="muted">Escreve a decisão. Depois do jogo, a app mostra o que mudou a seguir a ela — é a única forma de saber se resultou.</p>
@@ -184,6 +189,9 @@ const HalftimeScreen = {
     this.match = match;
     this.occurrences = occurrences;
     this.renderAdjustments();
+    // Tabela por jogador: números do jogo até aqui e a leitura do que mostram.
+    PlayerBoard.mount(document.getElementById('ht-player-board'), { match, occurrences, ownPlayers, opponentPlayers });
+
     document.querySelectorAll('.adj-preset').forEach((b) => b.addEventListener('click', () => {
       const campo = document.getElementById('adj-text');
       campo.value = b.textContent;
