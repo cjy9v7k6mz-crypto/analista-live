@@ -4,7 +4,7 @@
  * plano (stale-while-revalidate) para os ficheiros da aplicação.
  */
 
-const CACHE_VERSION = 'analista-live-v44';
+const CACHE_VERSION = 'analista-live-v45';
 const ASSETS = [
   './',
   './index.html',
@@ -28,6 +28,7 @@ const ASSETS = [
   './js/core/matchStats.js',
   './js/core/playerStats.js',
   './js/core/playerBoard.js',
+  './js/core/playerProfile.js',
   './js/core/matchEffects.js',
   './js/core/dataSafety.js',
   './js/core/matchSafety.js',
@@ -65,6 +66,7 @@ const ASSETS = [
   './js/ui/sketchPad.js',
   './js/ui/live.js',
   './js/ui/halftime.js',
+  './js/ui/goalEditor.js',
   './js/ui/postgame.js',
   './js/ui/gamesList.js',
   './js/ui/library.js',

@@ -291,6 +291,118 @@ describe('LineupState.compute — quem está em campo', () => {
 });
 
 // ---------------------------------------------------------------------------
+describe('PlayerProfile — o detalhe fino de um jogador', () => {
+  const jogo = (extra = {}) => match({
+    status: 'finished', competition: 'Campeonato',
+    teams: { own: { teamId: 'T', starterIds: ['a'], positions: [{ playerId: 'a' }] }, opponent: { teamId: 'X' } },
+    ...extra,
+  });
+
+  it('remates: por resultado e por terço, e os que não foram detalhados', () => {
+    const occs = [
+      occ({ source: 'remate', playerIds: ['a'], meta: { result: 'goal', origin: { x: 0.5, y: 0.2 } } }),
+      occ({ source: 'remate', playerIds: ['a'], meta: { result: 'save', origin: { x: 0.5, y: 0.5 } } }),
+      occ({ source: 'remate', playerIds: ['a'], meta: {} }),
+      occ({ source: 'remate', playerIds: ['b'], meta: { result: 'wide' } }),
+    ];
+    const p = PlayerProfile.compute('a', 'T', [{ match: jogo(), occurrences: occs }]);
+    eq([p.shots.total, p.shots.byResult.goal, p.shots.byResult.save, p.shots.semDetalhe], [3, 1, 1, 1]);
+    eq([p.shots.byThird.att, p.shots.byThird.mid, p.shots.byThird.semDetalhe], [1, 1, 1]);
+  });
+
+  it('quem passou não leva o remate, mas leva a oportunidade criada e a assistência do golo', () => {
+    const occs = [occ({ source: 'remate', playerIds: ['a', 'b'], meta: { result: 'goal', passerId: 'b' } })];
+    const entries = [{ match: jogo(), occurrences: occs }];
+    const rematador = PlayerProfile.compute('a', 'T', entries);
+    const passador = PlayerProfile.compute('b', 'T', entries);
+    eq([rematador.shots.total, rematador.golos.total, rematador.golos.deRemate], [1, 1, 1]);
+    eq([passador.shots.total, passador.extras.oportunidadesCriadas, passador.assistencias.total], [0, 1, 1]);
+  });
+
+  it('autogolo não conta como golo de quem o marcou', () => {
+    const occs = [occ({ source: 'golo', team: 'opponent', meta: { ownGoal: true, scorerId: 'a' } })];
+    const p = PlayerProfile.compute('a', 'T', [{ match: jogo(), occurrences: occs }]);
+    eq(p.golos.total, 0);
+  });
+
+  it('golos arrumados por janela de 15 minutos e por parte', () => {
+    const occs = [
+      occ({ source: 'golo', minute: 12, period: '1T', meta: { scorerId: 'a' } }),
+      occ({ source: 'golo', minute: 80, period: '2T', meta: { scorerId: 'a', assistId: 'b' } }),
+      occ({ source: 'golo', minute: 95, period: '2T', meta: { scorerId: 'a' } }),
+    ];
+    const p = PlayerProfile.compute('a', 'T', [{ match: jogo(), occurrences: occs }]);
+    eq([p.golos.total, p.golos.byWindow['0-15'], p.golos.byWindow['76-90'], p.golos.byWindow['90+']], [3, 1, 1, 1]);
+    eq([p.golos.byPeriod['1T'], p.golos.byPeriod['2T'], p.golos.assistidos], [1, 2, 1]);
+  });
+
+  it('faltas: consequências e terço onde são cometidas; as sofridas são de outro jogador', () => {
+    const occs = [
+      occ({ source: 'falta', playerIds: ['a'], meta: { committedById: 'a', consequences: ['freeKick', 'yellow'], location: { x: 0.5, y: 0.8 } } }),
+      occ({ source: 'falta', playerIds: ['a'], meta: { committedById: 'a', consequences: ['penalty'] } }),
+      occ({ source: 'falta', playerIds: ['a'], meta: { sufferedById: 'a' } }),
+    ];
+    const p = PlayerProfile.compute('a', 'T', [{ match: jogo(), occurrences: occs }]);
+    eq([p.faltas.cometidas, p.faltas.sofridas], [2, 1]);
+    eq([p.faltas.consequencias.freeKick, p.faltas.consequencias.yellow, p.faltas.consequencias.penalty], [1, 1, 1]);
+    eq([p.faltas.byThird.def, p.faltas.byThird.semDetalhe], [1, 1]);
+    eq(p.extras.amarelos, 1);
+  });
+
+  it('perdas e recuperações são espelho e ficam arrumadas por terço', () => {
+    const occs = [
+      occ({ source: 'perda', playerIds: ['a'], meta: { ownPlayerId: 'a', location: { x: 0.5, y: 0.9 } } }),
+      occ({ source: 'recuperacao', playerIds: ['a'], meta: { ownPlayerId: 'a', location: { x: 0.5, y: 0.2 } } }),
+      occ({ source: 'perda', playerIds: ['b'], meta: { ownPlayerId: 'b', oppPlayerId: 'a' } }),
+    ];
+    const p = PlayerProfile.compute('a', 'T', [{ match: jogo(), occurrences: occs }]);
+    eq([p.bola.totalPerdas, p.bola.perdas.def], [1, 1]);
+    eq([p.bola.totalRecuperacoes, p.bola.recuperacoes.att, p.bola.recuperacoes.semDetalhe], [2, 1, 1], 'a perda do colega é recuperação do adversário — aqui o jogador é o adversário');
+  });
+
+  it('a mesma conta separada por competição', () => {
+    const g = (comp, min) => ({
+      match: jogo({ competition: comp }),
+      occurrences: [occ({ source: 'golo', minute: min, meta: { scorerId: 'a' } })],
+    });
+    const p = PlayerProfile.compute('a', 'T', [g('Campeonato', 10), g('Campeonato', 20), g('Taça', 30)]);
+    eq(p.porCompeticao.map((c) => [c.competicao, c.jogos, c.agg.goals]), [['Campeonato', 2, 2], ['Taça', 1, 1]]);
+    eq(p.golos.total, 3, 'o total continua a ser a soma de tudo');
+  });
+
+  it('percentagem sem base não é inventada', () => {
+    eq(PlayerProfile.pct(2, 4), 50);
+    eq(PlayerProfile.pct(1, 0), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('GoalEditor.goals — todos os golos do jogo, venham de onde vierem', () => {
+  it('junta os golos do placar e os remates marcados Golo, por minuto', () => {
+    const m = match({ score: { team: 2, opponent: 1 } });
+    const occs = [
+      occ({ source: 'remate', minute: 70, team: 'own', playerIds: ['a', 'b'], meta: { result: 'goal', passerId: 'b' } }),
+      occ({ source: 'golo', minute: 10, team: 'own', meta: { scorerId: 'c', assistId: 'd' } }),
+      occ({ source: 'golo', minute: 55, team: 'opponent', meta: { scorerId: null } }),
+      occ({ source: 'remate', minute: 20, team: 'own', playerIds: ['a'], meta: { result: 'save' } }),
+    ];
+    const golos = GoalEditor.goals(m, occs);
+    eq(golos.map((g) => g.minute), [10, 55, 70], 'o remate defendido não é golo');
+    eq([golos[0].origem, golos[0].scorerId, golos[0].assistId], ['placar', 'c', 'd']);
+    eq([golos[2].origem, golos[2].scorerId, golos[2].assistId], ['remate', 'a', 'b'], 'quem rematou é o marcador; o passe é a assistência');
+    eq(golos[1].scorerId, null, 'um golo sem marcador identificado aparece na mesma');
+  });
+
+  it('o nome do registo acompanha o marcador e o placar', () => {
+    GoalEditor.ctx = { ownPlayers: [{ id: 'c', number: 9, shortName: 'Faria' }], opponentPlayers: [] };
+    eq(GoalEditor.labelFor(false, 'c', { team: 1, opponent: 0 }), 'Golo Faria (1-0)');
+    eq(GoalEditor.labelFor(true, 'c', { team: 1, opponent: 1 }), 'Autogolo (Faria) (1-1)');
+    eq(GoalEditor.labelFor(false, null, { team: 2, opponent: 1 }), 'Golo (2-1)');
+    GoalEditor.ctx = null;
+  });
+});
+
+// ---------------------------------------------------------------------------
 describe('PlayerBoard — como se estão a sair', () => {
   const jogo = () => match({
     status: 'finished',

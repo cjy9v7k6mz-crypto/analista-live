@@ -1655,6 +1655,43 @@ input[type="range"] { width: 100%; accent-color: var(--c-blue); }
 .coach-summary-players .pb-table th, .coach-summary-players .pb-table td { padding: 5px 7px; }
 .coach-summary-players tbody th.pb-name { background: var(--bg-elevated); }
 
+/* ---------- Detalhe do jogador (hub do plantel) ---------- */
+.ss-detail-block { margin: 16px 0; }
+.ss-detail-block > h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .04em; }
+.ss-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.ss-detail-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; }
+.ss-detail-card h5 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.ss-dl { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; border-bottom: 1px solid var(--border); }
+.ss-dl:last-child { border-bottom: none; }
+.ss-dl span { color: var(--text-dim); }
+.ss-dl strong { white-space: nowrap; }
+.ss-dl-sep { font-size: 11px; font-weight: 800; color: var(--text-mute); text-transform: uppercase;
+  letter-spacing: .04em; margin: 8px 0 2px; }
+.ss-dl-note { font-size: 11px; margin: 6px 0 0; }
+.ss-comp-name { text-align: left; font-weight: 700; white-space: nowrap; }
+
+/* ---------- Corrigir golos e assistências (pós-jogo) ---------- */
+.ge-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.ge-score { font-size: 15px; }
+.ge-check { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 12px; }
+.ge-check.is-ok { background: var(--c-green-bg); color: var(--c-green); }
+.ge-check.is-off { background: var(--c-yellow-bg); color: var(--c-yellow); }
+.ge-warn { font-size: 13px; color: var(--c-yellow); margin: 0 0 10px; }
+.ge-list { display: flex; flex-direction: column; gap: 6px; }
+.ge-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--surface-2); border: 1px solid var(--border); border-left-width: 3px;
+  border-radius: var(--radius); padding: 8px 12px; }
+.ge-row.is-own { border-left-color: var(--c-green); }
+.ge-row.is-opp { border-left-color: var(--c-red); }
+.ge-min { font-weight: 800; font-size: 13px; min-width: 34px; }
+.ge-team { font-size: 12px; color: var(--text-dim); min-width: 90px; }
+.ge-who { flex: 1; font-size: 14px; min-width: 160px; }
+.ge-missing { color: var(--c-yellow); font-weight: 700; }
+.ge-tag, .ge-src { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1px 6px; color: var(--text-mute); }
+.ge-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+
 /* ---------- Estatísticas do Plantel ---------- */
 .ss-controls { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin: 4px 0 14px; }
 .ss-controls .field { min-width: 180px; }

@@ -127,6 +127,12 @@ const PostgameScreen = {
         </section>
 
         <section class="once-panel">
+          <h2>⚽ Golos e assistências <span class="muted">corrigir depois do jogo</span></h2>
+          <p class="muted">Durante o jogo o placar muda com um toque e o detalhe fica para depois. Aqui acerta-se o marcador, a assistência e o minuto — e acrescenta-se ou retira-se um golo, com o placar a acompanhar.</p>
+          <div id="pg-goals"></div>
+        </section>
+
+        <section class="once-panel">
           <h2>👥 Como se saíram os jogadores</h2>
           <div id="pg-player-board"></div>
         </section>
@@ -276,6 +282,13 @@ const PostgameScreen = {
 
     // Tabela por jogador: os números do jogo e a leitura do que mostram.
     PlayerBoard.mount(document.getElementById('pg-player-board'), { match, occurrences, ownPlayers, opponentPlayers });
+
+    // Correção de golos e assistências. Qualquer alteração mexe no placar e nas
+    // contas, por isso o ecrã é redesenhado a seguir.
+    GoalEditor.mount(document.getElementById('pg-goals'), {
+      match, occurrences, ownPlayers, opponentPlayers,
+      onChange: () => this.render(document.getElementById('app-root'), params),
+    });
 
     this.bindFeedback();
     document.getElementById('sp-open-safety')?.addEventListener('click', () =>

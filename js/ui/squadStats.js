@@ -36,6 +36,7 @@ const SquadStatsScreen = {
           <button class="icon-btn" data-nav="#/dashboard" aria-label="Voltar">←</button>
           <h1>Estatísticas do Plantel</h1>
           <button class="btn btn-small" id="ss-csv">⬇ CSV</button>
+          <button class="btn btn-small" id="ss-csv-full" title="Uma linha por jogador e por jogo, com todas as colunas">⬇ CSV detalhado</button>
         </header>
 
         <div class="ss-controls">
@@ -67,6 +68,7 @@ const SquadStatsScreen = {
       this.renderBody();
     });
     document.getElementById('ss-csv').addEventListener('click', () => this.exportCSV());
+    document.getElementById('ss-csv-full').addEventListener('click', () => this.exportDetailCSV());
 
     this.renderBody();
   },
@@ -310,6 +312,117 @@ const SquadStatsScreen = {
       </div>`).join('')}</div>`;
   },
 
+  /** O mesmo jogador, competição a competição — 3 golos no campeonato e 3 na taça não dizem o mesmo. */
+  competitionTableHTML(prof) {
+    const linhas = prof.porCompeticao;
+    if (linhas.length <= 1) return '';
+    const cols = PlayerStats.COLUMNS.filter((c) => c.key !== 'apps');
+    return `
+      <section class="ss-detail-block">
+        <h4>🏆 Por competição</h4>
+        <div class="ss-table-wrap">
+          <table class="ss-table ss-table-plain">
+            <thead><tr><th>Competição</th><th title="Jogos em que entrou">J</th>${cols.map((c) => `<th title="${Utils.escapeHtml(c.title)}">${c.label}</th>`).join('')}</tr></thead>
+            <tbody>
+              ${linhas.map((g) => `<tr>
+                <td class="ss-comp-name">${Utils.escapeHtml(g.competicao)}</td>
+                <td>${g.agg.apps}</td>
+                ${cols.map((c) => `<td class="${g.agg[c.key] ? '' : 'is-zero'}">${g.agg[c.key] || 0}</td>`).join('')}
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </section>`;
+  },
+
+  /**
+   * O detalhe fino: de onde vêm os remates e em que acabam, onde se perde e
+   * recupera a bola, o que as faltas custaram, quando aparecem os golos.
+   * Um bloco sem nada registado não aparece — e um bloco com total mas sem
+   * detalhe di-lo em vez de mostrar zeros que parecem informação.
+   */
+  detailHTML(prof) {
+    const linha = (label, valor, total) => {
+      const pct = PlayerProfile.pct(valor, total);
+      return `<div class="ss-dl"><span>${Utils.escapeHtml(label)}</span><strong>${valor}${pct !== null && total ? ` <span class="muted">${pct}%</span>` : ''}</strong></div>`;
+    };
+    const semDetalhe = (n) => (n ? `<p class="muted ss-dl-note">${n} sem detalhe registado.</p>` : '');
+    const blocos = [];
+
+    if (prof.shots.total) {
+      const r = prof.shots.byResult;
+      blocos.push(`<section class="ss-detail-card">
+        <h5>🎯 Remates <span class="muted">${prof.shots.total}</span></h5>
+        ${MatchStats.SHOT_RESULTS.filter((x) => r[x.key]).map((x) => linha(x.label, r[x.key], prof.shots.total)).join('') || '<p class="muted">Sem resultado registado.</p>'}
+        <div class="ss-dl-sep">De onde</div>
+        ${['att', 'mid', 'def'].filter((t) => prof.shots.byThird[t]).map((t) => linha(PlayerProfile.THIRD_LABELS[t], prof.shots.byThird[t], prof.shots.total)).join('')}
+        ${semDetalhe(prof.shots.byThird.semDetalhe)}
+      </section>`);
+    }
+
+    if (prof.golos.total || prof.assistencias.total) {
+      const janelas = PlayerProfile.WINDOWS.filter((w) => prof.golos.byWindow[w.key] || prof.assistencias.byWindow[w.key]);
+      blocos.push(`<section class="ss-detail-card">
+        <h5>⚽ Golos e assistências <span class="muted">${prof.golos.total} + ${prof.assistencias.total}</span></h5>
+        ${prof.golos.total ? linha('De remate detalhado', prof.golos.deRemate, prof.golos.total) : ''}
+        ${prof.golos.total ? linha('Pelo placar', prof.golos.doPlacar, prof.golos.total) : ''}
+        ${prof.golos.total ? linha('Com assistência identificada', prof.golos.assistidos, prof.golos.total) : ''}
+        <div class="ss-dl-sep">Quando (G = golos · A = assistências)</div>
+        ${janelas.map((w) => {
+          const g = prof.golos.byWindow[w.key];
+          const a = prof.assistencias.byWindow[w.key];
+          return `<div class="ss-dl"><span>${w.label}</span><strong>${[g ? g + 'G' : '', a ? a + 'A' : ''].filter(Boolean).join(' · ')}</strong></div>`;
+        }).join('') || '<p class="muted">—</p>'}
+      </section>`);
+    }
+
+    if (prof.bola.totalPerdas || prof.bola.totalRecuperacoes) {
+      blocos.push(`<section class="ss-detail-card">
+        <h5>🔁 Perdas e recuperações <span class="muted">${prof.bola.totalPerdas} / ${prof.bola.totalRecuperacoes}</span></h5>
+        ${prof.bola.totalPerdas ? `<div class="ss-dl-sep">Onde perde</div>
+        ${['att', 'mid', 'def'].filter((t) => prof.bola.perdas[t]).map((t) => linha(PlayerProfile.THIRD_LABELS[t], prof.bola.perdas[t], prof.bola.totalPerdas)).join('')}
+        ${semDetalhe(prof.bola.perdas.semDetalhe)}` : ''}
+        ${prof.bola.totalRecuperacoes ? `<div class="ss-dl-sep">Onde recupera</div>
+        ${['att', 'mid', 'def'].filter((t) => prof.bola.recuperacoes[t]).map((t) => linha(PlayerProfile.THIRD_LABELS[t], prof.bola.recuperacoes[t], prof.bola.totalRecuperacoes)).join('')}
+        ${semDetalhe(prof.bola.recuperacoes.semDetalhe)}` : ''}
+      </section>`);
+    }
+
+    if (prof.faltas.cometidas || prof.faltas.sofridas) {
+      const c = prof.faltas.consequencias;
+      blocos.push(`<section class="ss-detail-card">
+        <h5>⚠️ Faltas <span class="muted">${prof.faltas.cometidas} cometidas · ${prof.faltas.sofridas} sofridas</span></h5>
+        ${MatchStats.FOUL_CONSEQUENCES.filter((x) => c[x.key]).map((x) => linha(x.label, c[x.key], prof.faltas.cometidas)).join('') || '<p class="muted">Sem consequências registadas.</p>'}
+        <div class="ss-dl-sep">Onde comete</div>
+        ${['att', 'mid', 'def'].filter((t) => prof.faltas.byThird[t]).map((t) => linha(PlayerProfile.THIRD_LABELS[t], prof.faltas.byThird[t], prof.faltas.cometidas)).join('')}
+        ${semDetalhe(prof.faltas.byThird.semDetalhe)}
+      </section>`);
+    }
+
+    if (prof.defesas.total) {
+      const t = prof.defesas.byType;
+      blocos.push(`<section class="ss-detail-card">
+        <h5>🧤 Defesas <span class="muted">${prof.defesas.total}</span></h5>
+        ${MatchStats.SAVE_TYPES.filter((x) => t[x.key]).map((x) => linha(x.label, t[x.key], prof.defesas.total)).join('') || '<p class="muted">Sem tipo registado.</p>'}
+      </section>`);
+    }
+
+    const ex = prof.extras;
+    if (ex.cantos || ex.momentos || ex.oportunidadesCriadas || ex.amarelos || ex.vermelhos) {
+      blocos.push(`<section class="ss-detail-card">
+        <h5>📌 Outros</h5>
+        ${ex.oportunidadesCriadas ? linha('Grandes oportunidades criadas', ex.oportunidadesCriadas) : ''}
+        ${ex.cantos ? linha('Cantos batidos', ex.cantos) : ''}
+        ${ex.momentos ? linha('Momentos guardados', ex.momentos) : ''}
+        ${ex.amarelos ? linha('🟨 Amarelos', ex.amarelos) : ''}
+        ${ex.vermelhos ? linha('🟥 Vermelhos', ex.vermelhos) : ''}
+      </section>`);
+    }
+
+    if (!blocos.length) return '<p class="muted">Ainda não há ações registadas para detalhar.</p>';
+    return `<section class="ss-detail-block"><h4>🔍 Detalhe das ações</h4><div class="ss-detail-grid">${blocos.join('')}</div></section>`;
+  },
+
   openPlayerBreakdown(player, agg) {
     // Num plantel adversário, o adversário de cada jogo é a nossa equipa.
     const matchById = new Map(this.scopedEntries().map((e) => [e.match.id, e.match]));
@@ -319,7 +432,10 @@ const SquadStatsScreen = {
     };
     const dlg = document.createElement('dialog');
     dlg.className = 'dialog dialog-wide';
-    const cols = ['minutes', 'goals', 'assists', 'shots', 'shotsOnTarget', 'recuperacoes', 'perdas', 'foulsCommitted', 'foulsSuffered', 'yellow', 'red'];
+    // Todas as colunas, não uma seleção: o jogo a jogo é onde se procura o
+    // detalhe, e faltar uma coluna obriga a abrir a ficha do jogo para a ver.
+    const cols = PlayerStats.COLUMNS.filter((c) => c.key !== 'apps').map((c) => c.key);
+    const prof = PlayerProfile.compute(player.id, this.teamId, this.scopedEntries());
     const colLabel = (k) => PlayerStats.COLUMNS.find((c) => c.key === k)?.label || k;
     const p90line = agg.minutes >= 45 ? `<p class="muted">Por 90 min: ${['goals', 'assists', 'shots'].map((k) => `${colLabel(k)} ${PlayerStats.per90(agg[k], agg.minutes)}`).join(' · ')}</p>` : '';
     dlg.innerHTML = `
@@ -331,6 +447,8 @@ const SquadStatsScreen = {
         </div>
         <p class="muted">${agg.apps} jogo${agg.apps === 1 ? '' : 's'} (${agg.starts} titular) · ${agg.minutes}′ aprox. · ${agg.goals} golo${agg.goals === 1 ? '' : 's'} · ${agg.assists} assist.</p>
         ${p90line}
+        ${this.competitionTableHTML(prof)}
+        ${this.detailHTML(prof)}
         <div class="ss-breakdown-trend">
           <div class="ss-metric-chips" role="group" aria-label="Métrica do gráfico">
             ${SeasonTrends.PLAYER_KEYS.map((k) => `<button type="button" class="btn btn-tiny" data-metric="${k.key}">${k.label}</button>`).join('')}
@@ -405,6 +523,37 @@ const SquadStatsScreen = {
       dlg.close(); dlg.remove();
       window.location.hash = `#/player/${tr.dataset.openMatch}/${tr.dataset.openPlayer}`;
     }));
+  },
+
+  /** Linhas soltas (jogador × jogo) para abrir numa folha de cálculo. */
+  exportDetailCSV() {
+    const entries = this.scopedEntries();
+    const matchById = new Map(entries.map((e) => [e.match.id, e.match]));
+    const cols = PlayerStats.COLUMNS.filter((c) => c.key !== 'apps');
+    const header = ['Numero', 'Jogador', 'Posicao', 'Competicao', 'Data', 'Adversario', 'Estado', ...cols.map((c) => c.title)];
+    const lines = [];
+    for (const p of this.players) {
+      const agg = PlayerStats.aggregate(p.id, this.teamId, entries);
+      for (const r of agg.perMatch) {
+        const m = matchById.get(r.matchId);
+        const adversario = m && SeasonTrends.sideOf(m, this.teamId) === 'opponent' ? m.team : (r.opponent || '');
+        lines.push([
+          p.number ?? '', p.name, p.position || '',
+          (m && m.competition) || '', r.date || '', adversario,
+          r.status === 'starter' ? 'Titular' : (r.status === 'sub' ? 'Suplente' : ''),
+          ...cols.map((c) => (c.key === 'minutes' ? r.minutes : (r[c.key] || 0))),
+        ]);
+      }
+    }
+    if (!lines.length) { toast('Ainda não há jogos para exportar'); return; }
+    const csv = [header, ...lines].map((r) => r.map((v) => {
+      const s = String(v);
+      return /[",;\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(';')).join('\n');
+    const team = this.teams.find((t) => t.id === this.teamId);
+    const fname = `estatisticas_detalhe_${(team ? team.name : 'plantel').replace(/\s+/g, '-')}.csv`;
+    downloadFile(fname, '\ufeff' + csv, 'text/csv;charset=utf-8');
+    toast(`${lines.length} linhas exportadas`);
   },
 
   exportCSV() {
