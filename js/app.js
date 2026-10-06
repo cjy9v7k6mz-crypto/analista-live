@@ -26,6 +26,8 @@ const routes = [
   { pattern: /^#\/pair\/(.+)$/, screen: () => window.PairingScreen, params: (m) => ({ matchId: m[1] }) },
   { pattern: /^#\/coach/, screen: () => window.CoachDashboard },
   { pattern: /^#\/settings$/, screen: () => window.SettingsScreen },
+  { pattern: /^#\/equipa$/, screen: () => window.MirrorPairScreen },
+  { pattern: /^#\/equipa\/(.+)$/, screen: () => window.MirrorPairScreen, params: (m) => ({ token: m[1] }) },
 ];
 
 // Rotas descontinuadas: os ecrãs antigos de "Jogadores" (global, sem equipa) e
@@ -49,6 +51,23 @@ async function router() {
     try { d.close(); } catch (e) { /* ignora */ }
     if (!PERSISTENT_DIALOGS.has(d.id)) d.remove();
   });
+
+  // Modo consulta (equipa técnica): os ecrãs de registar e editar o jogo não
+  // abrem. Um jogo terminado vai para o relatório; um a decorrer acompanha-se
+  // no Modo Banco.
+  if (window.Mirror && Mirror.isReader()) {
+    const b = Mirror.blockedRoute(hash);
+    if (b) {
+      let to = '#/dashboard';
+      if (b.to === 'match') {
+        const m = await DB.get(DB.STORES.matches, b.matchId).catch(() => null);
+        if (m && m.status === 'finished') to = `#/postgame/${m.id}`;
+        else toast(m && m.status === 'in_progress' ? 'Jogo a decorrer — acompanha-o no Modo Banco' : 'Este jogo ainda está a ser preparado pelo analista');
+      }
+      window.location.hash = to;
+      return;
+    }
+  }
 
   for (const r of routes) {
     const match = hash.match(r.pattern);
@@ -103,6 +122,15 @@ function bootFailureScreen(err) {
 async function boot() {
   CrashGuard.install();
   await AppState.loadSettings();
+  // Antes de tudo o que escreve na base de dados (biblioteca por omissão,
+  // migrações): o papel no espelho decide se essas escritas seguem para a
+  // equipa técnica ou, num aparelho de consulta, se nem acontecem.
+  try {
+    await Mirror.init();
+  } catch (e) {
+    CrashGuard.record('espelho', e && e.message, e && e.stack, 'Mirror.init', false);
+    console.warn('Espelho: init falhou', e);
+  }
   // Pede ao browser para não limpar os dados quando falta espaço. Só pede
   // sozinho com a app instalada — no Firefox de computador isto abria uma
   // janela de permissão sem contexto. Nas Definições há o botão para pedir.
@@ -129,7 +157,8 @@ async function boot() {
   applyTheme();
 
   // Recuperação: se existir jogo em curso e não estamos já a navegar para ele
-  const inProgress = await AppState.findInProgressMatch();
+  // Num aparelho de consulta o jogo em curso é do analista: não há nada a "continuar".
+  const inProgress = Mirror.isReader() ? null : await AppState.findInProgressMatch();
   if (inProgress && !window.location.hash) {
     const cont = confirm(`Encontrámos um jogo em curso: ${inProgress.team} vs ${inProgress.opponent}.\n\nOK = Continuar jogo\nCancelar = Ir para o início`);
     window.location.hash = cont ? `#/live/${inProgress.id}` : '#/dashboard';
@@ -150,6 +179,7 @@ async function boot() {
   } catch (e) { console.warn('Sync: não foi possível religar', e); }
 
   await router();
+  MirrorUI.installStatusPill();
 
   // Regista o Service Worker (offline)
   if ('serviceWorker' in navigator) {

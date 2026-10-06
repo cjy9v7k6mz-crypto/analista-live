@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'analista_live_db';
-const DB_VERSION = 7; // v7: cópias automáticas do jogo
+const DB_VERSION = 8; // v8: espelho da equipa (o que já foi enviado para a nuvem)
 
 const STORES = {
   matches: 'matches',           // 1 registo por jogo (inclui plano, resultado, metadata)
@@ -25,7 +25,11 @@ const STORES = {
   competitions: 'competitions', // provas: equipas, calendário e resultados (a classificação é calculada)
   referees: 'referees',         // árbitros: identidade e traços (os números são calculados dos jogos)
   matchSnapshots: 'matchSnapshots', // cópias automáticas de um jogo (rede de segurança)
+  mirrorPushed: 'mirrorPushed', // espelho da equipa: impressão digital do que já está na nuvem
 };
+
+// Do aparelho, não dos dados: não vai nos backups nem é reposto por eles.
+const LOCAL_ONLY_STORES = new Set([STORES.mirrorPushed]);
 
 let _dbPromise = null;
 
@@ -112,6 +116,9 @@ function openDB() {
       if (!db.objectStoreNames.contains(STORES.matchSnapshots)) {
         const s = db.createObjectStore(STORES.matchSnapshots, { keyPath: 'id' });
         s.createIndex('matchId', 'matchId');
+      }
+      if (!db.objectStoreNames.contains(STORES.mirrorPushed)) {
+        db.createObjectStore(STORES.mirrorPushed, { keyPath: 'k' });
       }
     };
 
@@ -244,6 +251,7 @@ const DB = {
   async exportAll() {
     const out = {};
     for (const key of Object.values(STORES)) {
+      if (LOCAL_ONLY_STORES.has(key)) continue;
       out[key] = await this.getAll(key);
     }
     out.exportedAt = new Date().toISOString();
@@ -254,6 +262,7 @@ const DB = {
   /** Restaura a base de dados a partir de um objeto de backup (substitui tudo). */
   async importAll(data) {
     for (const key of Object.values(STORES)) {
+      if (LOCAL_ONLY_STORES.has(key)) continue;
       if (Array.isArray(data[key])) {
         await this.clear(key);
         await this.bulkPut(key, data[key]);

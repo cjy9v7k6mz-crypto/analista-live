@@ -2233,3 +2233,109 @@ describe('MatchSafety.verify — saber sozinho quando os números deixam de bate
     ok(MatchSafety.gameLabel({ currentPeriod: '2T', timerSnapshot: { period: '2T', periodElapsedMs: 10 * 60000 } }).includes('55'));
   });
 });
+
+describe('Mirror — o espelho para a equipa técnica', () => {
+  const link = { url: 'https://abcd.supabase.co', anonKey: 'sb_publishable_' + 'x'.repeat(30), readKey: 'R'.repeat(43) };
+
+  it('o link leva tudo e volta a dar o mesmo (não há código para escrever)', () => {
+    const l = Mirror.encodeLink('https://app.exemplo.pt/index.html#/settings', link);
+    ok(l.startsWith('https://app.exemplo.pt/index.html#/equipa/'), l);
+    eq(Mirror.decodeLink(l), link);
+    // Só a parte depois de #/equipa/ também serve (colado à mão).
+    eq(Mirror.decodeLink(l.split('#/equipa/')[1]), link);
+    // Com espaços à volta, como vem do WhatsApp.
+    eq(Mirror.decodeLink(`  ${l}\n`), link);
+  });
+
+  it('um link estragado ou de outra coisa não entra', () => {
+    eq(Mirror.decodeLink(''), null);
+    eq(Mirror.decodeLink('https://app.exemplo.pt/#/dashboard'), null);
+    eq(Mirror.decodeLink('https://app.exemplo.pt/#/equipa/abc'), null);
+    const curto = Mirror.encodeLink('https://a.pt/', { ...link, readKey: 'curta' });
+    eq(Mirror.decodeLink(curto), null, 'chave de leitura curta');
+    const http = Mirror.encodeLink('https://a.pt/', { ...link, url: 'http://abcd.supabase.co' });
+    eq(Mirror.decodeLink(http), null, 'sem https');
+  });
+
+  it('as chaves são longas e nunca se repetem', () => {
+    const a = Mirror.newKey();
+    const b = Mirror.newKey();
+    eq(a.length, 43);
+    ok(/^[A-Za-z0-9_-]+$/.test(a), a);
+    ok(a !== b);
+  });
+
+  it('o jogo vai sem as fotos dos plantéis (o que encheu os 815 MB)', () => {
+    const m = { id: 'M', score: { team: 1, opponent: 0 }, teamSnapshot: { own: { players: [{ photo: 'data:image/jpeg;base64,AAAA' }] } } };
+    const s = Mirror.slim('matches', m);
+    eq(s.teamSnapshot, undefined);
+    eq(s.score, { team: 1, opponent: 0 });
+    ok(m.teamSnapshot, 'não mexe no original');
+    const p = { id: 'p1', name: 'X' };
+    ok(Mirror.slim('players', p) === p, 'o resto vai tal como está');
+  });
+
+  it('a impressão digital muda quando o registo muda, e só então', () => {
+    const a = Mirror.hash(JSON.stringify({ id: 1, x: 'a' }));
+    eq(Mirror.hash(JSON.stringify({ id: 1, x: 'a' })), a);
+    ok(Mirror.hash(JSON.stringify({ id: 1, x: 'b' })) !== a);
+    ok(Mirror.hash('') !== Mirror.hash('null'));
+  });
+
+  it('das definições só segue o que muda a leitura dos relatórios', () => {
+    eq(Mirror.metaFromSettings({ teamName: 'SC', analystName: 'B', supabaseAnonKey: 'k', theme: 'light', trendConfig: { a: 1 } }),
+      { teamName: 'SC', analystName: 'B', trendConfig: { a: 1 } });
+    eq(Mirror.metaFromSettings(null), {});
+  });
+
+  it('os lotes respeitam o tamanho e o número de linhas', () => {
+    const rows = Array.from({ length: 7 }, (_, i) => ({ i, _size: 400 }));
+    eq(Mirror.chunk(rows, 1000, 100).map((l) => l.length), [2, 2, 2, 1]);
+    eq(Mirror.chunk(rows, 1e9, 3).map((l) => l.length), [3, 3, 1]);
+    // Uma linha maior do que o limite vai sozinha, não fica presa.
+    eq(Mirror.chunk([{ _size: 5000 }, { _size: 10 }], 1000, 100).map((l) => l.length), [1, 1]);
+    eq(Mirror.chunk([]), []);
+  });
+
+  it('no banco, uma linha antiga do espelho não faz o placar andar para trás', () => {
+    const row = (store, payload) => ({ store, id: payload.id, payload });
+    const local = { id: 'M', updatedAt: 2000 };
+    ok(!Mirror.shouldApplyRow(row('matches', { id: 'M', updatedAt: 1000 }), local, 'M'), 'mais antiga: fica a do banco');
+    ok(Mirror.shouldApplyRow(row('matches', { id: 'M', updatedAt: 3000 }), local, 'M'), 'mais recente: entra');
+    ok(Mirror.shouldApplyRow(row('matches', { id: 'M', updatedAt: 1000 }), local, null), 'sem jogo em direto: o espelho manda');
+    ok(Mirror.shouldApplyRow(row('matches', { id: 'OUTRO', updatedAt: 1 }), { id: 'OUTRO', updatedAt: 9 }, 'M'), 'outro jogo: entra');
+    ok(!Mirror.shouldApplyRow(row('occurrences', { id: 'o1', matchId: 'M', timestamp: 5 }), { id: 'o1', timestamp: 9 }, 'M'));
+    ok(Mirror.shouldApplyRow(row('players', { id: 'p1' }), { id: 'p1', updatedAt: 9 }, 'M'), 'plantel não é do jogo');
+  });
+
+  it('em consulta, os ecrãs de registar e editar não abrem', () => {
+    eq(Mirror.blockedRoute('#/new-game'), { to: 'home' });
+    eq(Mirror.blockedRoute('#/library'), { to: 'home' });
+    eq(Mirror.blockedRoute('#/pair/M1'), { to: 'home' });
+    eq(Mirror.blockedRoute('#/live/M1'), { to: 'match', matchId: 'M1' });
+    eq(Mirror.blockedRoute('#/plan/M1'), { to: 'match', matchId: 'M1' });
+    eq(Mirror.blockedRoute('#/halftime/M1'), { to: 'match', matchId: 'M1' });
+    eq(Mirror.blockedRoute('#/postgame/M1'), null);
+    eq(Mirror.blockedRoute('#/squad-stats'), null);
+    eq(Mirror.blockedRoute('#/coach'), null);
+    eq(Mirror.blockedRoute('#/equipa/abc'), null);
+  });
+
+  it('a faixa de estado diz a verdade sobre a frescura dos dados', () => {
+    const now = Date.UTC(2026, 9, 6, 20, 0);
+    const base = { role: 'reader', lastCheckAt: now - 20000, lastChangeAt: now - 4 * 60000 };
+    eq(Mirror.freshness({ role: 'writer' }, now), null);
+    eq(Mirror.freshness({ role: 'reader' }, now).state, 'wait');
+    const ok1 = Mirror.freshness(base, now);
+    eq(ok1.state, 'ok');
+    ok(ok1.text.includes('há 4 min'), ok1.text);
+    const off = Mirror.freshness(base, now, false);
+    eq(off.state, 'stale');
+    ok(off.text.startsWith('Sem ligação'), off.text);
+    const velho = Mirror.freshness({ ...base, lastCheckAt: now - 2 * 3600000 }, now);
+    eq(velho.state, 'stale');
+    ok(velho.text.includes('há 2 h'), velho.text);
+    eq(Mirror.freshness({ ...base, revoked: true }, now).state, 'bad');
+    ok(Mirror.freshness({ ...base, lastChangeAt: now - 3 * 86400000 }, now).text.includes('há 3 dias'));
+  });
+});

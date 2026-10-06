@@ -35,3 +35,19 @@ já instalados apanharem a nova versão.
 O modelo de dados verdadeiro é o IndexedDB de cada dispositivo. O Supabase é
 apenas um canal de entrega com histórico. A chave **anon** é pública por
 desenho; nunca usar a `service_role`. Configuração em Definições → Sincronização.
+
+## Espelho da Equipa (consulta 24/7)
+
+Uma cópia permanente do que está no iPad do analista, para a equipa técnica
+consultar a qualquer hora (`js/sync/mirror.js`, `js/ui/mirrorUI.js`).
+
+- Configurar uma vez: correr `supabase-espelho.sql` no SQL Editor do mesmo
+  projeto Supabase. Depois, no iPad do analista: Definições → Equipa técnica →
+  Ativar, e partilhar o link.
+- Quem abre o link fica em modo consulta (só leitura) e o aparelho lembra-se:
+  não há código para voltar a escrever.
+- Uma linha por registo, substituída quando muda (não cresce a cada golo); o
+  jogo vai sem as fotos do `teamSnapshot`. Uma época fica nas dezenas de MB.
+- A chave de escrita fica só no iPad do analista; a de leitura vai no link e
+  pode ser mudada (quem tinha o link antigo deixa de ver).
+

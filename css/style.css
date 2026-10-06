@@ -1985,3 +1985,25 @@ html[data-theme="light"] { --chart-series: #2a78d6; }
 .vs-chip input { accent-color: var(--c-blue); }
 .vs-chip:has(input:checked) { border-color: var(--c-blue); background: var(--c-blue-bg); }
 .vs-filter-note { margin: 0 0 8px; }
+
+/* ==========================================================================
+   Espelho da Equipa — modo consulta (equipa técnica)
+   ========================================================================== */
+body.is-reader .reader-hide { display: none !important; }
+.mirror-pill {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  max-width: calc(100vw - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text-dim);
+  padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; z-index: 900;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3); cursor: pointer;
+}
+.mirror-pill[data-state="ok"]::before { content: "●"; color: var(--c-green); margin-right: 6px; }
+.mirror-pill[data-state="stale"], .mirror-pill[data-state="wait"] { border-color: var(--c-yellow); color: var(--text); }
+.mirror-pill[data-state="bad"] { border-color: var(--c-red); background: var(--c-red-bg); color: var(--text); }
+.mirror-pill[data-state="new"] { border-color: var(--c-blue); background: var(--c-blue-bg); color: var(--text); }
+body.is-reader .screen { padding-bottom: 56px; }
+.mirror-banner.mirror-ok { background: var(--c-green-bg); border-color: var(--c-green); }
+.mirror-banner.mirror-bad { background: var(--c-red-bg); border-color: var(--c-red); }
+.mirror-banner .banner-detail { margin: 4px 0 0; font-size: 13px; color: var(--text-dim); }
+.mirror-pair .field input { width: 100%; }

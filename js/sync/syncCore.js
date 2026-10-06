@@ -405,7 +405,20 @@ const SyncCore = {
     return dele >= meu;
   },
 
+  // Quantas aplicações estão a decorrer. O modo consulta (mirror.js) deixa
+  // passar estas escritas: são o jogo em direto a chegar ao banco.
+  _applyingDepth: 0,
+
   async _apply(env) {
+    this._applyingDepth++;
+    try {
+      return await this._applyEnvelope(env);
+    } finally {
+      this._applyingDepth--;
+    }
+  },
+
+  async _applyEnvelope(env) {
     const p = env.payload;
     if (env.entityType === 'snapshot') {
       // Espelho local do jogo, para o banco funcionar mesmo que perca a ligação.

@@ -4,7 +4,7 @@
  * plano (stale-while-revalidate) para os ficheiros da aplicação.
  */
 
-const CACHE_VERSION = 'analista-live-v46';
+const CACHE_VERSION = 'analista-live-v47';
 const ASSETS = [
   './',
   './index.html',
@@ -47,6 +47,7 @@ const ASSETS = [
   './js/sync/syncCore.js',
   './js/sync/transportLocal.js',
   './js/sync/transportSupabase.js',
+  './js/sync/mirror.js',
   './js/ui/syncUI.js',
   './js/ui/coachDashboard.js',
   './js/export/exportManager.js',
@@ -80,6 +81,7 @@ const ASSETS = [
   './js/ui/scoutingHub.js',
   './js/ui/rosterImport.js',
   './js/ui/playerDetail.js',
+  './js/ui/mirrorUI.js',
   './js/ui/settings.js',
   './js/app.js',
   './icons/icon-192.png',

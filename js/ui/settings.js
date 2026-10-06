@@ -91,6 +91,8 @@ const SettingsScreen = {
           <button type="button" class="btn btn-block" id="btn-test-sync">🔌 Testar ligação ao Supabase</button>
           <pre class="sync-diag" id="sync-diag" hidden></pre>
 
+          ${MirrorUI.settingsSectionHtml()}
+
           <h2 class="section-title">Diagnóstico</h2>
           <p class="muted settings-note">
             O que falhou por dentro, com data e hora. Num iPad não há consola: sem
@@ -211,6 +213,7 @@ const SettingsScreen = {
       });
     };
     paintSafety();
+    MirrorUI.paintSettings();
 
     // Diagnóstico: o que a rede de segurança apanhou.
     const paintDiag = () => {

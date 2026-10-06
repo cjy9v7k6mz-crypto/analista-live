@@ -12,16 +12,16 @@ const GamesListScreen = {
         <header class="screen-header">
           <button class="icon-btn" data-nav="#/dashboard" aria-label="Voltar">←</button>
           <h1>Jogos</h1>
-          <button class="btn btn-primary" data-nav="#/new-game">＋ Novo</button>
+          <button class="btn btn-primary reader-hide" data-nav="#/new-game">＋ Novo</button>
         </header>
 
         <div class="backup-panel">
           <button class="btn" id="btn-full-backup">⬇ Backup completo (JSON)</button>
-          <label class="btn btn-file">
+          <label class="btn btn-file reader-hide">
             ⬆ Restaurar backup (JSON)
             <input type="file" id="file-restore" accept="application/json" hidden>
           </label>
-          <label class="btn btn-file">
+          <label class="btn btn-file reader-hide">
             ⬆ Importar um jogo (JSON)
             <input type="file" id="file-import-match" accept="application/json" hidden>
           </label>
@@ -157,7 +157,7 @@ function gameRow(m) {
         <span class="muted">${Utils.formatDate(m.date)} · ${Utils.escapeHtml(m.competition || '—')}</span>
       </div>
       <span class="status-pill status-${m.status}">${{ in_progress: 'Em curso', finished: 'Terminado', draft: 'Por iniciar' }[m.status] || m.status}</span>
-      <button class="btn btn-tiny btn-danger" data-del-game="${m.id}" title="Apagar jogo" aria-label="Apagar jogo">✕</button>
+      <button class="btn btn-tiny btn-danger reader-hide" data-del-game="${m.id}" title="Apagar jogo" aria-label="Apagar jogo">✕</button>
     </div>
   `;
 }
