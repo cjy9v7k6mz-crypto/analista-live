@@ -43,6 +43,28 @@ const StatsPanel = {
     if (this._dlg?.open) this._dlg.close();
   },
 
+  /**
+   * Abre o detalhe de um registo JÁ FEITO (remate, canto, falta, defesa) para
+   * o corrigir. É o mesmo diálogo do registo ao vivo, com tudo o que já estava
+   * preenchido à vista — o que não se mexe fica como está.
+   */
+  openDetail(live, occ) {
+    if (!occ) return false;
+    const fluxos = {
+      remate: 'openShotDetail', canto: 'openCornerDetail',
+      falta: 'openFoulDetail', defesa: 'openSaveDetail',
+    };
+    const fn = fluxos[occ.source];
+    if (!fn) return false;
+    this.live = live;
+    this._mapMode = null;
+    const dlg = this._ensureDialog();
+    occ.meta = occ.meta || {};
+    this[fn](occ);
+    if (!dlg.open) dlg.showModal();
+    return true;
+  },
+
   refreshLiveViews() {
     this.live.renderHistory();
     this.live.renderButtons();
@@ -241,9 +263,12 @@ const StatsPanel = {
     this._dlg.querySelector('#pg-passer').outerHTML = PlayerGrid.html({ id: 'pg-passer', players: roster(), selectedId: chosenPasserId, exclude: [chosenPlayerId].filter(Boolean) });
     PlayerGrid.bind(this._dlg, 'pg-passer', (id) => { chosenPasserId = id; });
 
-    this.bindMiniPitch('#shot-origin-pitch', '#shot-origin-dot', (xy) => { occ.meta.origin = xy; });
+    this.bindMiniPitch('#shot-origin-pitch', '#shot-origin-dot', (xy) => { occ.meta.origin = xy; }, occ.meta && occ.meta.origin);
 
-    let chosenZone = null;
+    // Resultado anterior: serve para marcar o botão certo e, sobretudo, para
+    // não voltar a somar um golo que já estava somado (ver "shot-done").
+    const resultadoInicial = (occ.meta && occ.meta.result) || null;
+    let chosenZone = (occ.meta && occ.meta.goalZone) || null;
     this._dlg.querySelectorAll('.result-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         this._dlg.querySelectorAll('.result-btn').forEach((b) => b.classList.remove('selected'));
@@ -260,6 +285,17 @@ const StatsPanel = {
         chosenZone = btn.dataset.zone;
       });
     });
+    // Estado de partida quando se volta a um remate já detalhado.
+    if (resultadoInicial) {
+      const bt = this._dlg.querySelector(`.result-btn[data-result="${resultadoInicial}"]`);
+      if (bt) bt.classList.add('selected');
+      this._dlg.querySelector('#shot-goal-zone-wrap').hidden = !(resultadoInicial === 'goal' || resultadoInicial === 'save');
+      this._dlg.querySelector('#shot-passer-note').hidden = resultadoInicial !== 'goal';
+    }
+    if (chosenZone) {
+      const bz = this._dlg.querySelector(`.goal-zone-btn[data-zone="${chosenZone}"]`);
+      if (bz) bz.classList.add('selected');
+    }
 
     this._dlg.querySelector('#shot-done').addEventListener('click', async () => {
       occ.playerIds = [chosenPlayerId, chosenPasserId].filter(Boolean);
@@ -267,16 +303,20 @@ const StatsPanel = {
       occ.meta.passerId = chosenPasserId;
       // Num golo, o passe É a assistência: a mesma pessoa, duas leituras.
       occ.meta.assistId = occ.meta.result === 'goal' ? chosenPasserId : null;
-      if (occ.meta.result === 'goal') {
-        // Fonte única do placar — um remate marcado "Golo" incrementa o resultado
-        // diretamente; nunca cria um segundo registo de golo (ver matchStats.js).
-        if (side === 'own') this.live.match.score.team++; else this.live.match.score.opponent++;
-        document.querySelector('#live-score [data-team="team"]').textContent = this.live.match.score.team;
-        document.querySelector('#live-score [data-team="opponent"]').textContent = this.live.match.score.opponent;
+      // Fonte única do placar — um remate marcado "Golo" incrementa o resultado
+      // diretamente; nunca cria um segundo registo de golo (ver matchStats.js).
+      // Só conta a MUDANÇA: voltar a um remate que já era golo não soma outra
+      // vez, e desmarcá-lo devolve o golo ao placar.
+      const delta = MatchEffects.shotScoreDelta(resultadoInicial, occ.meta.result);
+      if (delta) {
+        const chave = side === 'own' ? 'team' : 'opponent';
+        this.live.match.score[chave] = Math.max(0, this.live.match.score[chave] + delta);
+        const el = document.querySelector(`#live-score [data-team="${chave}"]`);
+        if (el) el.textContent = this.live.match.score[chave];
       }
       await AppState.updateOccurrence(occ);
       await AppState.persistMatch();
-      if (occ.meta.result === 'goal') this.live.publishMatchState();
+      if (delta) this.live.publishMatchState();
       this.refreshLiveViews();
       toast('Remate atualizado');
       this.renderMain();
@@ -347,6 +387,15 @@ const StatsPanel = {
         occ.meta.side = btn.dataset.side;
       });
     });
+    if (occ.meta && occ.meta.side) {
+      const b = this._dlg.querySelector(`[data-side="${occ.meta.side}"]`);
+      if (b) b.classList.add('selected');
+    }
+    if (occ.meta && occ.meta.result) {
+      const b = this._dlg.querySelector(`[data-result="${occ.meta.result}"]`);
+      if (b) b.classList.add('selected');
+      this._dlg.querySelector('#corner-chain-wrap').hidden = !(occ.meta.result === 'shot' || occ.meta.result === 'goal');
+    }
     let chosenPlayerId = (occ.playerIds || [])[0] || null;
     this._dlg.querySelector('#pg-corner').outerHTML = PlayerGrid.html({ id: 'pg-corner', players: this.rosterFor(side), selectedId: chosenPlayerId });
     PlayerGrid.bind(this._dlg, 'pg-corner', (id) => { chosenPlayerId = id; });
@@ -436,7 +485,7 @@ const StatsPanel = {
         </div>
       </div>
     `;
-    this.bindMiniPitch('#foul-loc-pitch', '#foul-loc-dot', (xy) => { occ.meta.location = xy; });
+    this.bindMiniPitch('#foul-loc-pitch', '#foul-loc-dot', (xy) => { occ.meta.location = xy; }, occ.meta && occ.meta.location);
     this._dlg.querySelectorAll('[data-type]').forEach((btn) => {
       btn.addEventListener('click', () => {
         this._dlg.querySelectorAll('[data-type]').forEach((b) => b.classList.remove('selected'));
@@ -451,7 +500,18 @@ const StatsPanel = {
     this._dlg.querySelector('#pg-foul-suffered').outerHTML = PlayerGrid.html({ id: 'pg-foul-suffered', players: this.rosterFor(otherSide), selectedId: sufferedId });
     PlayerGrid.bind(this._dlg, 'pg-foul-suffered', (id) => { sufferedId = id; });
     // Consequências são multi-seleção: uma falta pode dar livre + amarelo.
-    const conseq = new Set();
+    // Partem do que já está registado — senão corrigir o jogador apagava o
+    // amarelo que lá estava.
+    const conseq = new Set((occ.meta && occ.meta.consequences) || []);
+    if (occ.meta && occ.meta.type) {
+      const bt = this._dlg.querySelector(`[data-type="${occ.meta.type}"]`);
+      if (bt) bt.classList.add('selected');
+    }
+    conseq.forEach((k) => {
+      const b = this._dlg.querySelector(`[data-conseq="${k}"]`);
+      if (b) b.classList.add('selected');
+    });
+    this._dlg.querySelector('#foul-chain-wrap').hidden = !conseq.has('freeKick');
     this._dlg.querySelectorAll('[data-conseq]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const k = btn.dataset.conseq;
@@ -560,7 +620,9 @@ const StatsPanel = {
         </div>
       </div>`;
 
-    let keeperId = occ.meta?.keeperId || (occ.playerIds || [])[0] || null, saveType = null, shotId = null;
+    let keeperId = occ.meta?.keeperId || (occ.playerIds || [])[0] || null;
+    let saveType = occ.meta?.saveType || null;
+    let shotId = occ.meta?.shotId || null;
     this._dlg.querySelector('#pg-keeper').outerHTML = PlayerGrid.html({ id: 'pg-keeper', players: this.rosterFor(side), selectedId: keeperId });
     PlayerGrid.bind(this._dlg, 'pg-keeper', (id) => { keeperId = id; });
     this._dlg.querySelectorAll('[data-savetype]').forEach((b) => b.addEventListener('click', () => {
@@ -573,6 +635,16 @@ const StatsPanel = {
       b.classList.add('selected');
       shotId = b.dataset.shot;
     }));
+    // O que já estava registado aparece marcado (ver bindMiniPitch).
+    if (saveType) {
+      const b = this._dlg.querySelector(`[data-savetype="${saveType}"]`);
+      if (b) b.classList.add('selected');
+    }
+    if (shotId) {
+      const b = this._dlg.querySelector(`[data-shot="${shotId}"]`);
+      if (b) b.classList.add('selected');
+    }
+    if (occ.meta && occ.meta.moment) this._dlg.querySelector('#save-moment').checked = true;
 
     this._dlg.querySelector('#save-done').addEventListener('click', async () => {
       occ.meta.keeperId = keeperId;
@@ -649,9 +721,16 @@ const StatsPanel = {
     `;
   },
 
-  bindMiniPitch(pitchSel, dotSel, onPick) {
+  bindMiniPitch(pitchSel, dotSel, onPick, inicial) {
     const pitch = this._dlg.querySelector(pitchSel);
     const dot = this._dlg.querySelector(dotSel);
+    // A corrigir um registo antigo, o sítio que já estava marcado tem de
+    // aparecer — senão parece que nunca foi marcado e perde-se ao gravar.
+    if (inicial && typeof inicial.x === 'number' && typeof inicial.y === 'number') {
+      dot.style.left = (inicial.x * 100) + '%';
+      dot.style.top = (inicial.y * 100) + '%';
+      dot.hidden = false;
+    }
     pitch.addEventListener('click', (e) => {
       const rect = pitch.getBoundingClientRect();
       const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));

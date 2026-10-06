@@ -822,10 +822,15 @@ const LiveScreen = {
     const playerChips = players.length
       ? `<span class="history-players">${players.map((p) => `<span class="history-player-chip" data-open-player="${p.id}">${Utils.escapeHtml(p.shortName || p.name)}</span>`).join('')}</span>`
       : `<button class="history-add-player" data-tag-player="${o.id}" title="Adicionar jogador">+ jogador</button>`;
+    // ✎ volta ao detalhe do registo (corrigir um golo sem marcador, um remate
+    // sem resultado…). Só aparece onde há mesmo um detalhe para onde voltar.
+    const corrigir = this.hasDetail(o)
+      ? `<button class="history-edit" data-detail-occ="${o.id}" title="Corrigir este registo">✎</button>` : '';
     return `<div class="history-row source-${o.source} ${o._unsaved ? 'is-unsaved' : ''}">
       <span class="history-time">${t}</span>
       <span class="history-label">${o._unsaved ? '<span class="history-unsaved" title="Ainda não foi guardado no dispositivo">⚠️</span> ' : ''}${Utils.escapeHtml(o.eventName)}</span>
       ${playerChips}
+      ${corrigir}
     </div>`;
   },
 
@@ -1138,7 +1143,10 @@ const LiveScreen = {
     document.getElementById('history-feed').addEventListener('click', async (e) => {
       const tagBtn = e.target.closest('[data-tag-player]');
       const chip = e.target.closest('[data-open-player]');
-      if (tagBtn) {
+      const detalhe = e.target.closest('[data-detail-occ]');
+      if (detalhe) {
+        this.openDetailFor(detalhe.dataset.detailOcc);
+      } else if (tagBtn) {
         const occ = this.occurrences.find((o) => o.id === tagBtn.dataset.tagPlayer);
         if (occ) await this.tagPlayersOnOccurrence(occ);
       } else if (chip) {
@@ -1767,11 +1775,11 @@ const LiveScreen = {
           <h3>⚽ Golo — ${Utils.escapeHtml(benefitingTeam)}</h3>
           <button type="button" class="icon-btn" id="goal-close" title="Fechar sem detalhar">✕</button>
         </div>
-        <p class="muted">${String(occ.minute).padStart(2, '0')}:${String(occ.second).padStart(2, '0')} · o golo já está registado. Detalhar é opcional — podes fechar e voltar a este golo pelo histórico.</p>
+        <p class="muted">${String(occ.minute).padStart(2, '0')}:${String(occ.second).padStart(2, '0')} · o golo já está registado. Detalhar é opcional — podes fechar e voltar a este golo pelo histórico (botão ✎).</p>
         <p class="field-label">Tipo</p>
         <div class="stats-team-pick">
-          <button class="btn result-btn selected" data-goal-type="normal">Golo normal</button>
-          <button class="btn result-btn" data-goal-type="own">Autogolo</button>
+          <button class="btn result-btn ${occ.meta && occ.meta.ownGoal ? '' : 'selected'}" data-goal-type="normal">Golo normal</button>
+          <button class="btn result-btn ${occ.meta && occ.meta.ownGoal ? 'selected' : ''}" data-goal-type="own">Autogolo</button>
         </div>
         <div id="goal-people">
           <p class="field-label" id="goal-scorer-label">Marcador</p>
@@ -1790,8 +1798,12 @@ const LiveScreen = {
     document.body.appendChild(dlg);
     dlg.showModal();
 
-    let isOwnGoal = false;
-    let scorerId = null, assistId = null;
+    // A voltar a um golo já registado, parte-se do que lá está: é esta a
+    // diferença entre "detalhar" e "corrigir". O placar não se toca aqui —
+    // acrescentar ou retirar golos faz-se no pós-jogo.
+    let isOwnGoal = !!(occ.meta && occ.meta.ownGoal);
+    let scorerId = (occ.meta && occ.meta.scorerId) || null;
+    let assistId = (occ.meta && occ.meta.assistId) || null;
 
     // Fechar sem detalhar mantém o golo tal como foi registado no primeiro
     // toque — o analista nunca fica preso a preencher nada durante o jogo.
@@ -1831,6 +1843,14 @@ const LiveScreen = {
       paintPeople();
     }));
 
+    // O resto do estado anterior (autogolo, momento, nota) também volta.
+    if (isOwnGoal) {
+      dlg.querySelector('#goal-assist-wrap').style.display = 'none';
+      dlg.querySelector('#goal-scorer-label').textContent =
+        `Autogolo de (jogador d${side === 'own' ? 'o ' + this.match.opponent : 'a ' + this.match.team})`;
+    }
+    if (occ.meta && occ.meta.moment) dlg.querySelector('#goal-moment').checked = true;
+    if (occ.note) dlg.querySelector('#goal-note').value = occ.note;
     paintPeople();
 
     dlg.querySelector('#goal-done').addEventListener('click', async () => {
@@ -1850,6 +1870,31 @@ const LiveScreen = {
       this.renderStatsIfOpen();
       toast(occ.meta.moment ? '⭐ Golo guardado como momento' : 'Golo atualizado');
     });
+  },
+
+  /** Registos que têm um diálogo de detalhe para onde voltar. */
+  DETAILABLE: ['golo', 'remate', 'falta', 'canto', 'defesa'],
+
+  hasDetail(occ) {
+    return !!occ && this.DETAILABLE.includes(occ.source);
+  },
+
+  /**
+   * Volta ao detalhe de um registo JÁ FEITO, para o corrigir — o caso típico é
+   * um golo registado com um toque no placar e que ficou sem marcador.
+   * Reabre o mesmo diálogo do registo, com tudo o que já estava preenchido.
+   */
+  openDetailFor(occId) {
+    const occ = this.occurrences.find((o) => o.id === occId);
+    if (!occ) return false;
+    if (occ.source === 'golo') {
+      occ.meta = occ.meta || {};
+      this.openGoalDetail(occ, occ.team || 'own');
+      return true;
+    }
+    if (window.StatsPanel && StatsPanel.openDetail(this, occ)) return true;
+    toast('Este registo não tem detalhe para corrigir — usa ⋮ → Histórico → Editar.');
+    return false;
   },
 
   openTeamPanel(side) {
@@ -1957,6 +2002,7 @@ const LiveScreen = {
             <span class="history-full-name">${Utils.escapeHtml(o.eventName)}</span>
             ${players.length ? `<span class="history-players">${players.map((p) => `<span class="history-player-chip">${Utils.escapeHtml(p.shortName || p.name)}</span>`).join('')}</span>` : ''}
             ${o.note ? `<span class="history-full-note">"${Utils.escapeHtml(o.note)}"</span>` : ''}
+            ${this.hasDetail(o) ? `<button class="btn btn-tiny" data-detail-occ="${o.id}" title="Voltar ao detalhe deste registo">✎ Corrigir</button>` : ''}
             <button class="btn btn-tiny" data-edit-occ="${o.id}">Editar</button>
           </div>`;
           }).join('')
@@ -1964,6 +2010,14 @@ const LiveScreen = {
 
       document.getElementById('history-full-list').querySelectorAll('[data-edit-occ]').forEach((btn) => {
         btn.addEventListener('click', () => this.openEditOccurrence(btn.dataset.editOcc));
+      });
+      document.getElementById('history-full-list').querySelectorAll('[data-detail-occ]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          // O histórico completo fica por baixo; o detalhe abre por cima e,
+          // ao fechar, encontra a lista já atualizada.
+          this.openDetailFor(btn.dataset.detailOcc);
+          if (this._refreshFullHistory) setTimeout(() => this._refreshFullHistory(), 50);
+        });
       });
     };
     filtersEl.addEventListener('change', renderList);

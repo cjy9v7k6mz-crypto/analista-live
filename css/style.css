@@ -583,6 +583,14 @@ dialog.dialog::backdrop { background: rgba(4, 6, 10, .65); }
   font-size: 10px; padding: 2px 8px; border-radius: 10px; cursor: pointer;
 }
 .history-add-player:hover { color: var(--text-dim); border-color: var(--text-dim); }
+/* ✎ — voltar ao detalhe de um registo já feito (corrigir). Alvo generoso: é
+   para ser tocado com o jogo a andar. */
+.history-edit {
+  appearance: none; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text-dim);
+  font-size: 13px; line-height: 1; padding: 6px 9px; border-radius: 10px; cursor: pointer; margin-left: auto;
+}
+.history-edit:hover { color: var(--text); border-color: var(--c-blue); }
+.history-edit:active { transform: scale(.94); }
 .history-full-row { flex-wrap: wrap; gap: 8px; }
 
 /* ---------- Player Picker (seletor rápido) — cartões grandes em faixa deslizável ---------- */

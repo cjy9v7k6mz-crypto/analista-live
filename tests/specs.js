@@ -629,6 +629,16 @@ describe('LineupState.swapStarter — corrigir o onze ANTES do apito', () => {
 });
 
 describe('MatchEffects — desfazer/apagar reverte o que o registo mexeu no jogo', () => {
+  it('corrigir um remate só mexe no placar quando o golo muda', () => {
+    // Era isto que somava um golo a mais: reabrir um remate já marcado "Golo"
+    // para lhe pôr o marcador e voltar a gravar.
+    eq(MatchEffects.shotScoreDelta('goal', 'goal'), 0, 'continuar golo não soma outra vez');
+    eq(MatchEffects.shotScoreDelta('save', 'goal'), 1, 'passou a golo: soma');
+    eq(MatchEffects.shotScoreDelta('goal', 'wide'), -1, 'deixou de ser golo: devolve');
+    eq(MatchEffects.shotScoreDelta(null, 'goal'), 1, 'remate sem resultado que passa a golo');
+    eq(MatchEffects.shotScoreDelta(null, 'save'), 0);
+  });
+
   it('scoreKeyOf', () => {
     eq(MatchEffects.scoreKeyOf(occ({ source: 'golo', team: 'own' })), 'team');
     eq(MatchEffects.scoreKeyOf(occ({ source: 'remate', team: 'opponent', meta: { result: 'goal' } })), 'opponent');

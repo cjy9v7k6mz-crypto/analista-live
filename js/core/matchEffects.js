@@ -24,6 +24,17 @@ const MatchEffects = {
   },
 
   /**
+   * Quanto muda o placar ao corrigir o resultado de um remate.
+   *
+   * Existe porque reabrir um remate já marcado "Golo" e voltar a gravar somava
+   * um segundo golo ao placar: o que conta é a MUDANÇA, não o estado final.
+   * Desmarcar o golo devolve-o.
+   */
+  shotScoreDelta(antes, depois) {
+    return (depois === 'goal' ? 1 : 0) - (antes === 'goal' ? 1 : 0);
+  },
+
+  /**
    * Põe `match.cards` de acordo com as consequências de UMA falta. Idempotente:
    * reabrir o detalhe e voltar a gravar não duplica o cartão, e retirar o
    * amarelo/vermelho retira-o. Cartões de outras origens ficam intactos.
